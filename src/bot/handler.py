@@ -125,6 +125,17 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
                 save_message(chat_id, "assistant", reply)
                 return reply
 
+    # Greetings — respond warmly, no need for intent detection
+    lower_text = user_text.strip().lower()
+    greetings = {"hi", "hello", "hey", "hii", "helo", "helloo", "heyy", "yo", "sup", "good morning",
+                 "good evening", "good afternoon", "good night", "gm", "howdy", "namaste", "namaskar"}
+    if lower_text in greetings or lower_text.rstrip("!") in greetings:
+        profile = get_profile(chat_id)
+        exam = profile.get("exam") or "your exam"
+        reply = f"Hey! 👋 Good to see you. Ready to prep for *{exam}*?\n\nWhat do you need — syllabus, quiz, current affairs, or something else?"
+        save_message(chat_id, "assistant", reply)
+        return reply
+
     # Check if user is correcting or switching exam
     lower_text = user_text.lower()
     switching_keywords = ["change exam", "switch to", "preparing for", "switching to",
@@ -147,7 +158,16 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
     if intent == "SCHEDULE":
         schedule_text = parsed.get("schedule_text") or user_text
         interval = parse_interval(schedule_text)
-        job_type = JOB_TYPES.get(subject.lower(), "current_affairs")
+        # Detect job type from full message — check for practice/quiz keywords first
+        full_lower = user_text.lower()
+        if any(k in full_lower for k in ["practice", "question", "quiz", "mcq", "test me", "q&a"]):
+            job_type = "quiz"
+        elif any(k in full_lower for k in ["news", "current affairs", "update", "headlines"]):
+            job_type = "current_affairs"
+        elif any(k in full_lower for k in ["syllabus", "topics", "study material"]):
+            job_type = "syllabus"
+        else:
+            job_type = JOB_TYPES.get(subject.lower(), "current_affairs")
         reply = schedule_job(chat_id, job_type, interval, exam, subject)
 
     elif intent == "CANCEL_SCHEDULE":
@@ -157,7 +177,7 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         reply = start_quiz(chat_id, exam, subject)
 
     elif intent == "NEWS":
-        reply = get_current_affairs(exam)
+        reply, _ = get_current_affairs(exam)
 
     elif intent in ("SYLLABUS", "PAPER"):
         ctype = "syllabus" if intent == "SYLLABUS" else "paper"
@@ -165,18 +185,33 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         context = retrieve(user_text)
         history = get_history(chat_id)
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
-        reply = chat(messages, context=context)
+        # Syllabus overview = short; specific topic within syllabus = full
+        depth = "full" if subject else "short"
+        reply = chat(messages, context=context, depth=depth)
+
+    elif intent == "EXPLAIN":
+        context = retrieve(user_text)
+        history = get_history(chat_id)
+        messages = [{"role": m["role"], "content": m["content"]} for m in history]
+        # Explanations: short first, unless they already asked before (history shows follow-up)
+        expand_phrases = ["tell me more", "explain more", "elaborate", "in detail",
+                          "more about", "expand", "deep dive", "go on", "what else", "explain further"]
+        is_expanding = any(p in user_text.lower() for p in expand_phrases)
+        reply = chat(messages, context=context, depth="full" if is_expanding else "short")
 
     elif intent == "STUDY_PLAN":
         history = get_history(chat_id)
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
-        reply = chat(messages)
+        reply = chat(messages, depth="full")
 
-    else:  # EXPLAIN, GENERAL, ANSWER fallback
+    else:  # GENERAL fallback
+        expand_phrases = ["tell me more", "explain more", "elaborate", "in detail",
+                          "more about", "expand", "deep dive", "go on", "what else", "explain further"]
+        is_expanding = any(p in user_text.lower() for p in expand_phrases)
         context = retrieve(user_text)
         history = get_history(chat_id)
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
-        reply = chat(messages, context=context)
+        reply = chat(messages, context=context, depth="full" if is_expanding else "short")
 
     save_message(chat_id, "assistant", reply)
     return reply

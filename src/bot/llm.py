@@ -22,10 +22,14 @@ Rules:
 - For study plans, give actionable daily schedules
 - *Answer length*: Always start with a SHORT answer (2-4 lines max). Only give full detail when the user asks "tell me more", "explain", "elaborate", or asks about a specific point. Never dump everything at once."""
 
-def chat(messages: list, context: str = "") -> str:
+def chat(messages: list, context: str = "", depth: str = "short") -> str:
     system = SYSTEM_PROMPT
     if context:
         system += f"\n\nRelevant material found:\n{context}"
+    if depth == "short":
+        system += "\n\nIMPORTANT: Give a SHORT reply (2-4 lines max). If there's more to say, end with 'Want to know more?' — but do NOT elaborate yet."
+    elif depth == "full":
+        system += "\n\nIMPORTANT: The user wants full detail on this specific point. Explain thoroughly and completely."
     client = get_client()
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
