@@ -15,7 +15,9 @@ async def send_message(to: str, text: str):
         "text": {"body": text[:4000]},
     }
     async with httpx.AsyncClient() as client:
-        await client.post(GRAPH_URL, json=payload, headers=HEADERS)
+        r = await client.post(GRAPH_URL, json=payload, headers=HEADERS)
+        if r.status_code != 200:
+            print(f"[whatsapp] send failed {r.status_code}: {r.text}")
 
 def parse_webhook(body: dict) -> tuple | None:
     try:
