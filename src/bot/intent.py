@@ -10,10 +10,11 @@ Example: {"intent": "QUIZ", "exam": "HCS", "subject": "Polity", "year": null, "s
 Rules:
 - ANSWER = user replied A/B/C/D or short answer to a quiz question
 - PAPER = user wants past/previous year question paper
-- SYLLABUS = user wants topics list or syllabus
+- SYLLABUS = user wants topics/syllabus for any exam
 - SCHEDULE = user wants to set up a recurring update (e.g. "send me news every hour", "daily current affairs")
 - CANCEL_SCHEDULE = user wants to stop scheduled updates (e.g. "stop updates", "cancel reminders")
-- Default exam to HCS if not mentioned
+- exam can be ANY exam — UPSC, JEE, NEET, IELTS, AWS, CBSE, HCS, CAT, GMAT, GRE, SAT, or any other
+- If no exam is mentioned in the message, set exam to null (do NOT default to HCS)
 - Extract year if mentioned (e.g. 2023)
 - For SCHEDULE: put the full scheduling phrase in schedule_text (e.g. "every hour", "daily", "every 30 minutes")"""
 

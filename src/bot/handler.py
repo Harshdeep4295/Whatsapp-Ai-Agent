@@ -10,20 +10,36 @@ from bot.scheduler import schedule_job, cancel_jobs, parse_interval, JOB_TYPES
 ONBOARDING_MSG = (
     "Hey! I'm *Yudhister*, your exam prep buddy 👋\n\n"
     "Which exam are you preparing for? "
-    "(e.g. HCS, UPSC, SSC, IBPS, CBSE, RAS, or anything else)"
+    "It can be anything — government jobs, entrance exams, school/college exams, certifications, or any competitive exam!"
 )
 
 def _extract_exam_from_text(text: str) -> str | None:
-    """Quick keyword check for known exams in onboarding reply."""
-    known = ["upsc", "hcs", "ssc", "ibps", "ras", "ias", "neet", "jee",
-             "cbse", "rrb", "ctet", "gate", "cat", "clat", "nda", "cds"]
-    lower = text.lower()
-    for e in known:
-        if e in lower:
-            return e.upper()
-    # If user typed something custom (any word 2+ chars), trust it
-    words = [w.strip(".,!?") for w in text.split() if len(w.strip(".,!?")) >= 2]
-    return words[0].upper() if words else None
+    """Use LLM to extract exam name from natural language."""
+    from bot.llm import get_client
+    client = get_client()
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": (
+                    "Extract the exam name the user wants to prepare for. "
+                    "It can be ANY exam — government jobs (UPSC, SSC, HCS, IBPS, RAS...), "
+                    "entrance tests (JEE, NEET, GATE, CAT, GMAT, GRE, SAT, IELTS, TOEFL...), "
+                    "school/college (CBSE, ICSE, IB, A-levels...), certifications (AWS, PMP, CFA...), or anything else. "
+                    "Return ONLY a short recognizable exam name or abbreviation. "
+                    "Examples: 'Haryana Civil Service' -> 'HCS', 'IAS' -> 'UPSC', "
+                    "'AWS Solutions Architect' -> 'AWS-SAA', 'Class 10 boards' -> 'CBSE Class 10'. "
+                    "Return ONLY the exam name, nothing else. If unclear, return UNKNOWN."
+                )},
+                {"role": "user", "content": text}
+            ],
+            max_tokens=10,
+            temperature=0,
+        )
+        result = response.choices[0].message.content.strip().upper()
+        return None if result == "UNKNOWN" or len(result) > 20 else result
+    except Exception:
+        return None
 
 async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bool = False) -> str:
     # In groups, track conversation per group but attribute to sender
@@ -109,22 +125,23 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
                 save_message(chat_id, "assistant", reply)
                 return reply
 
-    # Check if user is switching exam
-    parsed_check = detect_intent(user_text)
-    detected_exam = parsed_check.get("exam")
+    # Check if user is correcting or switching exam
     lower_text = user_text.lower()
-    switching_keywords = ["change exam", "switch to", "preparing for", "switching to", "now preparing"]
-    if detected_exam and any(k in lower_text for k in switching_keywords):
-        save_profile(chat_id, exam=detected_exam, onboarded=True)
-        reply = f"Switched to *{detected_exam}*! Let's crush it. What do you need first?"
-        save_message(chat_id, "assistant", reply)
-        return reply
+    switching_keywords = ["change exam", "switch to", "preparing for", "switching to",
+                          "now preparing", "no no", "actually", "i mean", "want to prepare"]
+    if any(k in lower_text for k in switching_keywords):
+        new_exam = _extract_exam_from_text(user_text)
+        if new_exam:
+            save_profile(chat_id, exam=new_exam, onboarded=True)
+            reply = f"Got it, switching to *{new_exam}*! 💪 What do you want to start with?"
+            save_message(chat_id, "assistant", reply)
+            return reply
 
     parsed  = detect_intent(user_text)
     intent  = parsed.get("intent", "GENERAL")
-    # Use stored exam if intent didn't pick one up, else use detected
-    exam    = parsed.get("exam") or profile.get("exam") or "HCS"
-    subject = parsed.get("subject") or "General Studies"
+    # Always prefer stored profile exam; only use detected if explicitly mentioned
+    exam    = parsed.get("exam") or profile.get("exam") or "General"
+    subject = parsed.get("subject") or ""
     year    = parsed.get("year")
 
     if intent == "SCHEDULE":
