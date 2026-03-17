@@ -1,7 +1,7 @@
 import httpx
 import uuid
 import fitz
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from bs4 import BeautifulSoup
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from supabase import create_client

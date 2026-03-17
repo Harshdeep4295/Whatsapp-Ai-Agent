@@ -22,6 +22,20 @@ create table content_cache (
 );
 create index on content_cache(exam, content_type);
 
+-- Scheduled jobs per user
+create table scheduled_jobs (
+  id               bigserial primary key,
+  chat_id          text not null,
+  job_type         text not null,
+  interval_minutes int not null,
+  exam             text default 'HCS',
+  subject          text default '',
+  next_run_at      timestamptz not null,
+  active           boolean default true,
+  created_at       timestamptz default now()
+);
+create index on scheduled_jobs(active, next_run_at);
+
 -- Quiz sessions per user
 create table quiz_sessions (
   id             bigserial primary key,

@@ -1,13 +1,21 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import PlainTextResponse
 from bot.whatsapp import parse_webhook, send_message
 from bot.handler import handle_message
+from bot.scheduler import start_scheduler, stop_scheduler
 from config import WHATSAPP_VERIFY_TOKEN
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler()
+    yield
+    stop_scheduler()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 def health():

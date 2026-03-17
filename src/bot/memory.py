@@ -15,3 +15,15 @@ def get_history(chat_id: str, limit: int = 8) -> list:
         .order("created_at", desc=True)\
         .limit(limit).execute()
     return list(reversed(res.data))
+
+def get_profile(chat_id: str) -> dict:
+    res = sb.table("user_profiles").select("*").eq("chat_id", chat_id).execute()
+    if res.data:
+        return res.data[0]
+    return {"chat_id": chat_id, "exam": None, "onboarded": False}
+
+def save_profile(chat_id: str, exam: str | None, onboarded: bool = True):
+    data = {"chat_id": chat_id, "onboarded": onboarded}
+    if exam is not None:
+        data["exam"] = exam
+    sb.table("user_profiles").upsert(data).execute()
