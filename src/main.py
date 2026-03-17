@@ -36,7 +36,8 @@ async def webhook(request: Request):
     body = await request.json()
     result = parse_webhook(body)
     if result:
-        phone, text = result
-        reply = await handle_message(phone, text)
-        await send_message(phone, reply)
+        chat_id, sender, text, is_group = result
+        reply = await handle_message(chat_id, sender, text, is_group)
+        # In groups reply to group; in DMs reply to sender
+        await send_message(chat_id if is_group else sender, reply)
     return {"status": "ok"}

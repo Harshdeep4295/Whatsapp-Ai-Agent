@@ -25,8 +25,47 @@ def _extract_exam_from_text(text: str) -> str | None:
     words = [w.strip(".,!?") for w in text.split() if len(w.strip(".,!?")) >= 2]
     return words[0].upper() if words else None
 
-async def handle_message(chat_id: str, user_text: str) -> str:
+async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bool = False) -> str:
+    # In groups, track conversation per group but attribute to sender
+    # In DMs, chat_id == sender
+    display_name = sender if is_group else None
     save_message(chat_id, "user", user_text)
+
+    # Reset command — clears everything and restarts onboarding
+    if "clear all my session" in user_text.strip().lower():
+        from supabase import create_client
+        from config import SUPABASE_URL, SUPABASE_KEY
+        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+        sb.table("conversations").delete().eq("chat_id", chat_id).execute()
+        sb.table("user_profiles").delete().eq("chat_id", chat_id).execute()
+        sb.table("quiz_sessions").delete().eq("chat_id", chat_id).execute()
+        sb.table("scheduled_jobs").update({"active": False}).eq("chat_id", chat_id).execute()
+        save_message(chat_id, "assistant", ONBOARDING_MSG)
+        return ONBOARDING_MSG
+
+    # In groups: skip onboarding, use group-level profile
+    if is_group:
+        profile = get_profile(chat_id)
+        if not profile["onboarded"]:
+            history = get_history(chat_id)
+            already_asked = any(ONBOARDING_MSG[:30] in m.get("content", "") for m in history if m["role"] == "assistant")
+            if not already_asked:
+                save_message(chat_id, "assistant", ONBOARDING_MSG)
+                return ONBOARDING_MSG
+            else:
+                exam_guess = _extract_exam_from_text(user_text)
+                if not exam_guess:
+                    p = detect_intent(user_text)
+                    exam_guess = p.get("exam")
+                if exam_guess:
+                    save_profile(chat_id, exam=exam_guess, onboarded=True)
+                    reply = f"Got it! This group is prepping for *{exam_guess}* 💪 What do you need first?"
+                    save_message(chat_id, "assistant", reply)
+                    return reply
+                else:
+                    reply = "Which exam is this group preparing for? (e.g. UPSC, HCS, SSC)"
+                    save_message(chat_id, "assistant", reply)
+                    return reply
 
     # Mid-quiz: intercept answers and stop commands first
     if has_active_quiz(chat_id):
