@@ -5,7 +5,6 @@ python-dotenv
 groq
 supabase
 chromadb==0.4.24
-sentence-transformers
 pymupdf
 langchain-text-splitters==0.3.2
 duckduckgo-search

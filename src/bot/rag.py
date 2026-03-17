@@ -8,9 +8,7 @@ def _get_col():
     global _collection
     if _collection is None:
         client = chromadb.PersistentClient(path=CHROMA_PATH)
-        ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        )
+        ef = embedding_functions.DefaultEmbeddingFunction()
         _collection = client.get_or_create_collection(
             "exam_docs", embedding_function=ef
         )
