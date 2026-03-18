@@ -4,6 +4,10 @@ from bot.llm import get_client
 
 # Multiple feed pools — rotated to get fresh content each time
 FEEDS = [
+    # Haryana-specific sources (prioritized for HCS prep)
+    "https://www.tribuneindia.com/rss/haryana.xml",
+    "https://www.hindustantimes.com/feeds/rss/cities/chandigarh/rssfeed.xml",
+    # National current affairs sources
     "https://www.clearias.com/feed/",
     "https://currentaffairs.gktoday.in/feed",
     "https://www.jagranjosh.com/current-affairs/rss-feed",

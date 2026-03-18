@@ -1,217 +1,189 @@
+import re
 from bot.intent import detect_intent
 from bot.rag import retrieve
 from bot.llm import chat
-from bot.memory import save_message, get_history, get_profile, save_profile
+from bot.memory import save_message, get_history, get_current_topic, set_current_topic
 from bot.fetcher import search_and_fetch
-from bot.quiz import start_quiz, check_answer, stop_quiz, has_active_quiz
+from bot.quiz import (
+    start_quiz, check_answer, stop_quiz, has_active_quiz,
+    start_mock_test, check_mock_answer, has_active_mock_test,
+    start_study_session, check_study_answer, has_active_study_session,
+)
 from bot.news import get_current_affairs
 from bot.scheduler import schedule_job, cancel_jobs, parse_interval, JOB_TYPES
 
-ONBOARDING_MSG = (
-    "Hey! I'm *Yudhister*, your exam prep buddy 👋\n\n"
-    "Which exam are you preparing for? "
-    "It can be anything — government jobs, entrance exams, school/college exams, certifications, or any competitive exam!"
+EXAM = "HCS"  # Hardcoded — this bot is for HCS only
+
+WELCOME_MSG = (
+    "Hey! I'm *Yudhister* 👋 Your HCS exam prep buddy.\n\n"
+    "I'm here to help you crack the *Haryana Civil Services (HPSC)* exam. "
+    "We can do syllabus, practice questions, current affairs, study plans — whatever you need.\n\n"
+    "Where do you want to start?"
 )
 
-def _extract_exam_from_text(text: str) -> str | None:
-    """Use LLM to extract exam name from natural language."""
-    from bot.llm import get_client
-    client = get_client()
-    try:
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": (
-                    "Extract the exam name the user wants to prepare for. "
-                    "It can be ANY exam — government jobs (UPSC, SSC, HCS, IBPS, RAS...), "
-                    "entrance tests (JEE, NEET, GATE, CAT, GMAT, GRE, SAT, IELTS, TOEFL...), "
-                    "school/college (CBSE, ICSE, IB, A-levels...), certifications (AWS, PMP, CFA...), or anything else. "
-                    "Return ONLY a short recognizable exam name or abbreviation. "
-                    "Examples: 'Haryana Civil Service' -> 'HCS', 'IAS' -> 'UPSC', "
-                    "'AWS Solutions Architect' -> 'AWS-SAA', 'Class 10 boards' -> 'CBSE Class 10'. "
-                    "Return ONLY the exam name, nothing else. If unclear, return UNKNOWN."
-                )},
-                {"role": "user", "content": text}
-            ],
-            max_tokens=10,
-            temperature=0,
-        )
-        result = response.choices[0].message.content.strip().upper()
-        return None if result == "UNKNOWN" or len(result) > 20 else result
-    except Exception:
-        return None
+GREETINGS = {"hi", "hello", "hey", "hii", "helo", "helloo", "heyy", "yo", "sup",
+             "good morning", "good evening", "good afternoon", "good night",
+             "gm", "howdy", "namaste", "namaskar", "hlo", "hola"}
+
+EXPAND_PHRASES = {"tell me more", "explain more", "elaborate", "in detail", "more about",
+                  "expand", "deep dive", "go on", "what else", "explain further",
+                  "keep going", "and then", "then what", "continue"}
+
+STOP_PHRASES = {"stop", "quit", "end", "end quiz", "stop quiz", "end test", "stop test",
+                "end session", "stop session"}
+
+
+def _parse_mock_count(text: str, parsed_count) -> int:
+    """Extract number of questions from text, fall back to parsed intent count, default 10."""
+    if parsed_count and isinstance(parsed_count, int) and 1 <= parsed_count <= 50:
+        return parsed_count
+    m = re.search(r'(\d+)\s*(?:question|q)', text.lower())
+    if m:
+        n = int(m.group(1))
+        return max(1, min(n, 50))
+    return 10
+
 
 async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bool = False) -> str:
-    # In groups, track conversation per group but attribute to sender
-    # In DMs, chat_id == sender
-    display_name = sender if is_group else None
     save_message(chat_id, "user", user_text)
+    lower = user_text.strip().lower()
 
-    # Reset command — clears everything and restarts onboarding
-    if "clear all my session" in user_text.strip().lower():
+    # --- Reset ---
+    if "clear all my session" in lower:
         from supabase import create_client
         from config import SUPABASE_URL, SUPABASE_KEY
         sb = create_client(SUPABASE_URL, SUPABASE_KEY)
         sb.table("conversations").delete().eq("chat_id", chat_id).execute()
-        sb.table("user_profiles").delete().eq("chat_id", chat_id).execute()
         sb.table("quiz_sessions").delete().eq("chat_id", chat_id).execute()
+        sb.table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
         sb.table("scheduled_jobs").update({"active": False}).eq("chat_id", chat_id).execute()
-        save_message(chat_id, "assistant", ONBOARDING_MSG)
-        return ONBOARDING_MSG
+        set_current_topic(chat_id, None)
+        save_message(chat_id, "assistant", WELCOME_MSG)
+        return WELCOME_MSG
 
-    # In groups: skip onboarding, use group-level profile
-    if is_group:
-        profile = get_profile(chat_id)
-        if not profile["onboarded"]:
-            history = get_history(chat_id)
-            already_asked = any(ONBOARDING_MSG[:30] in m.get("content", "") for m in history if m["role"] == "assistant")
-            if not already_asked:
-                save_message(chat_id, "assistant", ONBOARDING_MSG)
-                return ONBOARDING_MSG
-            else:
-                exam_guess = _extract_exam_from_text(user_text)
-                if not exam_guess:
-                    p = detect_intent(user_text)
-                    exam_guess = p.get("exam")
-                if exam_guess:
-                    save_profile(chat_id, exam=exam_guess, onboarded=True)
-                    reply = f"Got it! This group is prepping for *{exam_guess}* 💪 What do you need first?"
-                    save_message(chat_id, "assistant", reply)
-                    return reply
-                else:
-                    reply = "Which exam is this group preparing for? (e.g. UPSC, HCS, SSC)"
-                    save_message(chat_id, "assistant", reply)
-                    return reply
+    # --- Greeting ---
+    if lower in GREETINGS or lower.rstrip("!") in GREETINGS:
+        history = get_history(chat_id)
+        if not history:
+            save_message(chat_id, "assistant", WELCOME_MSG)
+            return WELCOME_MSG
+        reply = "Hey! 👋 Good to see you again. Ready to continue HCS prep?\n\nWhat do you need — quiz, mock test, syllabus, current affairs, or study plan?"
+        save_message(chat_id, "assistant", reply)
+        return reply
 
-    # Mid-quiz: intercept answers and stop commands first
+    # --- Active mock test intercept ---
+    if has_active_mock_test(chat_id):
+        if lower in STOP_PHRASES:
+            from supabase import create_client
+            from config import SUPABASE_URL, SUPABASE_KEY
+            sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+            sb.table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
+            reply = "Mock test ended."
+            save_message(chat_id, "assistant", reply)
+            return reply
+        if len(lower) <= 2 or lower in ["a", "b", "c", "d"]:
+            reply = check_mock_answer(chat_id, user_text)
+            save_message(chat_id, "assistant", reply)
+            return reply
+
+    # --- Active study session intercept ---
+    if has_active_study_session(chat_id):
+        if lower in STOP_PHRASES:
+            from bot.memory import set_study_session
+            set_study_session(chat_id, None)
+            set_current_topic(chat_id, None)
+            reply = "Study session ended."
+            save_message(chat_id, "assistant", reply)
+            return reply
+        if len(lower) <= 2 or lower in ["a", "b", "c", "d"]:
+            reply = check_study_answer(chat_id, user_text)
+            save_message(chat_id, "assistant", reply)
+            return reply
+
+    # --- Mid-quiz intercept ---
     if has_active_quiz(chat_id):
-        lower = user_text.strip().lower()
-        if lower in ["stop", "quit", "end", "end quiz", "stop quiz"]:
+        if lower in STOP_PHRASES:
             reply = stop_quiz(chat_id)
             save_message(chat_id, "assistant", reply)
             return reply
-        if len(lower) <= 3 or lower in ["a", "b", "c", "d"]:
+        if len(lower) <= 2 or lower in ["a", "b", "c", "d"]:
             reply = check_answer(chat_id, user_text)
             save_message(chat_id, "assistant", reply)
             return reply
 
-    # Onboarding: ask exam on first message
-    profile = get_profile(chat_id)
-    if not profile["onboarded"]:
-        history = get_history(chat_id)
-        # Check if we already asked the onboarding question (it'll be in history)
-        already_asked = any(ONBOARDING_MSG[:30] in m.get("content", "") for m in history if m["role"] == "assistant")
-        if not already_asked:
-            save_message(chat_id, "assistant", ONBOARDING_MSG)
-            return ONBOARDING_MSG
-        else:
-            # User is replying with their exam — try to detect it
-            exam_guess = _extract_exam_from_text(user_text)
-            if not exam_guess:
-                # Try intent detection as fallback
-                p = detect_intent(user_text)
-                exam_guess = p.get("exam")
-            if exam_guess:
-                save_profile(chat_id, exam=exam_guess, onboarded=True)
-                reply = (
-                    f"Got it! Preparing for *{exam_guess}* 💪\n\n"
-                    f"I'll tailor everything for {exam_guess} from now on. "
-                    f"What do you want to start with? Syllabus, a quiz, current affairs, or something else?"
-                )
-                save_message(chat_id, "assistant", reply)
-                return reply
-            else:
-                reply = "I didn't catch that — which exam are you preparing for? (e.g. UPSC, HCS, SSC, IBPS)"
-                save_message(chat_id, "assistant", reply)
-                return reply
-
-    # Greetings — respond warmly, no need for intent detection
-    lower_text = user_text.strip().lower()
-    greetings = {"hi", "hello", "hey", "hii", "helo", "helloo", "heyy", "yo", "sup", "good morning",
-                 "good evening", "good afternoon", "good night", "gm", "howdy", "namaste", "namaskar"}
-    if lower_text in greetings or lower_text.rstrip("!") in greetings:
-        profile = get_profile(chat_id)
-        exam = profile.get("exam") or "your exam"
-        reply = f"Hey! 👋 Good to see you. Ready to prep for *{exam}*?\n\nWhat do you need — syllabus, quiz, current affairs, or something else?"
-        save_message(chat_id, "assistant", reply)
-        return reply
-
-    # Check if user is correcting or switching exam
-    lower_text = user_text.lower()
-    switching_keywords = ["change exam", "switch to", "preparing for", "switching to",
-                          "now preparing", "no no", "actually", "i mean", "want to prepare"]
-    if any(k in lower_text for k in switching_keywords):
-        new_exam = _extract_exam_from_text(user_text)
-        if new_exam:
-            save_profile(chat_id, exam=new_exam, onboarded=True)
-            reply = f"Got it, switching to *{new_exam}*! 💪 What do you want to start with?"
-            save_message(chat_id, "assistant", reply)
-            return reply
-
-    parsed  = detect_intent(user_text)
-    intent  = parsed.get("intent", "GENERAL")
-    # Always prefer stored profile exam; only use detected if explicitly mentioned
-    exam    = parsed.get("exam") or profile.get("exam") or "General"
+    # --- Intent detection ---
+    parsed = detect_intent(user_text)
+    intent = parsed.get("intent", "GENERAL")
     subject = parsed.get("subject") or ""
-    year    = parsed.get("year")
+    year = parsed.get("year")
+    current_topic = get_current_topic(chat_id)
 
+    # --- Route ---
     if intent == "SCHEDULE":
         schedule_text = parsed.get("schedule_text") or user_text
         interval = parse_interval(schedule_text)
-        # Detect job type from full message — check for practice/quiz keywords first
         full_lower = user_text.lower()
-        if any(k in full_lower for k in ["practice", "question", "quiz", "mcq", "test me", "q&a"]):
+        if any(k in full_lower for k in ["practice", "question", "quiz", "mcq", "test"]):
             job_type = "quiz"
         elif any(k in full_lower for k in ["news", "current affairs", "update", "headlines"]):
             job_type = "current_affairs"
-        elif any(k in full_lower for k in ["syllabus", "topics", "study material"]):
-            job_type = "syllabus"
+        elif any(k in full_lower for k in ["report", "performance", "weekly"]):
+            job_type = "weekly_report"
         else:
             job_type = JOB_TYPES.get(subject.lower(), "current_affairs")
-        reply = schedule_job(chat_id, job_type, interval, exam, subject)
+        reply = schedule_job(chat_id, job_type, interval, EXAM, subject)
 
     elif intent == "CANCEL_SCHEDULE":
         reply = cancel_jobs(chat_id)
 
+    elif intent == "MOCK_TEST":
+        n = _parse_mock_count(user_text, parsed.get("count"))
+        reply = start_mock_test(chat_id, n)
+
+    elif intent == "STUDY_SESSION":
+        topic = subject or "General Studies"
+        set_current_topic(chat_id, topic)
+        reply = start_study_session(chat_id, topic)
+
     elif intent == "QUIZ":
-        reply = start_quiz(chat_id, exam, subject)
+        if subject:
+            set_current_topic(chat_id, subject)
+        reply = start_quiz(chat_id, EXAM, subject)
 
     elif intent == "NEWS":
-        reply, _ = get_current_affairs(exam)
+        reply, _ = get_current_affairs(EXAM)
+        if not reply:
+            reply = "Couldn't fetch news right now. Try again in a bit!"
 
     elif intent in ("SYLLABUS", "PAPER"):
         ctype = "syllabus" if intent == "SYLLABUS" else "paper"
-        search_and_fetch(exam, ctype, subject, year)
+        search_and_fetch(EXAM, ctype, subject, year)
         context = retrieve(user_text)
         history = get_history(chat_id)
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
-        # Syllabus overview = short; specific topic within syllabus = full
         depth = "full" if subject else "short"
-        reply = chat(messages, context=context, depth=depth)
+        reply = chat(messages, context=context, depth=depth, current_topic=current_topic)
 
     elif intent == "EXPLAIN":
         context = retrieve(user_text)
         history = get_history(chat_id)
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
-        # Explanations: short first, unless they already asked before (history shows follow-up)
-        expand_phrases = ["tell me more", "explain more", "elaborate", "in detail",
-                          "more about", "expand", "deep dive", "go on", "what else", "explain further"]
-        is_expanding = any(p in user_text.lower() for p in expand_phrases)
-        reply = chat(messages, context=context, depth="full" if is_expanding else "short")
+        is_expanding = any(p in lower for p in EXPAND_PHRASES)
+        reply = chat(messages, context=context, depth="full" if is_expanding else "short",
+                     current_topic=current_topic)
 
     elif intent == "STUDY_PLAN":
         history = get_history(chat_id)
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
-        reply = chat(messages, depth="full")
+        reply = chat(messages, depth="full", current_topic=current_topic)
 
-    else:  # GENERAL fallback
-        expand_phrases = ["tell me more", "explain more", "elaborate", "in detail",
-                          "more about", "expand", "deep dive", "go on", "what else", "explain further"]
-        is_expanding = any(p in user_text.lower() for p in expand_phrases)
-        context = retrieve(user_text)
+    else:  # GENERAL — continue conversation naturally
+        is_expanding = any(p in lower for p in EXPAND_PHRASES)
+        context = retrieve(user_text) if len(user_text) > 10 else ""
         history = get_history(chat_id)
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
-        reply = chat(messages, context=context, depth="full" if is_expanding else "short")
+        reply = chat(messages, context=context, depth="full" if is_expanding else "short",
+                     current_topic=current_topic)
 
     save_message(chat_id, "assistant", reply)
     return reply

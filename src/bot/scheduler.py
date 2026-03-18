@@ -20,6 +20,9 @@ JOB_TYPES = {
     "study": "study_material",
     "material": "study_material",
     "explain": "explain",
+    "weekly_report": "weekly_report",
+    "report": "weekly_report",
+    "performance": "weekly_report",
 }
 
 INTERVAL_ALIASES = {
@@ -120,14 +123,15 @@ def _generate_content(job: dict) -> tuple[str, str]:
 
     if jtype == "quiz":
         # Quiz questions are LLM-generated with high temperature — always unique
-        from bot.quiz import _generate, _fmt
+        from bot.quiz import _generate, _fmt, _get_adaptive_topic
         try:
-            q = _generate(exam, subject)
+            topic = _get_adaptive_topic(job["chat_id"], subject)
+            q = _generate(topic)
             content = f"*Scheduled Quiz — {exam}*\n\n" + _fmt(q)
             content_hash = hashlib.md5(q["question"].encode()).hexdigest()
             if content_hash == last_hash:
                 # Regenerate once more to get a different question
-                q = _generate(exam, subject)
+                q = _generate(topic)
                 content = f"*Scheduled Quiz — {exam}*\n\n" + _fmt(q)
                 content_hash = hashlib.md5(q["question"].encode()).hexdigest()
             return content, content_hash
@@ -162,6 +166,42 @@ def _generate_content(job: dict) -> tuple[str, str]:
             return content, content_hash
         except Exception as e:
             print(f"[scheduler] study material fetch failed: {e}")
+            return None, ""
+
+    if jtype == "weekly_report":
+        try:
+            chat_id = job["chat_id"]
+            week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+            res = sb.table("user_progress").select("topic,correct,total,last_attempted")\
+                .eq("chat_id", chat_id)\
+                .gte("last_attempted", week_ago)\
+                .execute()
+            rows = res.data or []
+            if not rows:
+                return "*Weekly Report*\n\nNo quiz activity this week. Try *quiz me* to start practicing!", ""
+
+            total_q = sum(r["total"] for r in rows)
+            total_c = sum(r["correct"] for r in rows)
+            pct = int(total_c / total_q * 100) if total_q else 0
+
+            sorted_rows = sorted(rows, key=lambda r: (r["correct"] / r["total"]) if r["total"] else 0)
+            worst = sorted_rows[0]["topic"] if sorted_rows else "N/A"
+            best = sorted_rows[-1]["topic"] if sorted_rows else "N/A"
+            weak = [r["topic"] for r in sorted_rows if r["total"] > 0 and r["correct"] / r["total"] < 0.6]
+
+            report = (
+                f"*Weekly Performance Report* 📊\n\n"
+                f"Questions attempted: *{total_q}*\n"
+                f"Accuracy: *{total_c}/{total_q}* ({pct}%)\n\n"
+                f"*Best topic:* {best}\n"
+                f"*Needs work:* {worst}\n"
+            )
+            if weak:
+                report += f"\n*Focus next week:* {', '.join(weak[:3])}"
+            content_hash = hashlib.md5(report.encode()).hexdigest()
+            return report, content_hash
+        except Exception as e:
+            print(f"[scheduler] weekly_report failed: {e}")
             return None, ""
 
     return None, ""

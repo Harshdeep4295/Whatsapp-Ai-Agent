@@ -9,6 +9,22 @@ from bot.handler import handle_message
 from bot.scheduler import start_scheduler, stop_scheduler
 from config import WHATSAPP_VERIFY_TOKEN
 
+# In-memory dedup: track last 200 processed message IDs to skip Meta duplicate deliveries
+_seen_message_ids: set = set()
+_seen_order: list = []
+
+def _is_duplicate(msg_id: str) -> bool:
+    if not msg_id:
+        return False
+    if msg_id in _seen_message_ids:
+        return True
+    _seen_message_ids.add(msg_id)
+    _seen_order.append(msg_id)
+    if len(_seen_order) > 200:
+        old = _seen_order.pop(0)
+        _seen_message_ids.discard(old)
+    return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_scheduler()
@@ -34,10 +50,19 @@ def verify(
 @app.post("/webhook")
 async def webhook(request: Request):
     body = await request.json()
+
+    # Extract message ID for dedup before parsing
+    try:
+        msg_id = body["entry"][0]["changes"][0]["value"]["messages"][0]["id"]
+        if _is_duplicate(msg_id):
+            print(f"[webhook] duplicate message {msg_id}, skipping")
+            return {"status": "ok"}
+    except (KeyError, IndexError, TypeError):
+        pass
+
     result = parse_webhook(body)
     if result:
         chat_id, sender, text, is_group = result
         reply = await handle_message(chat_id, sender, text, is_group)
-        # In groups reply to group; in DMs reply to sender
         await send_message(chat_id if is_group else sender, reply)
     return {"status": "ok"}
