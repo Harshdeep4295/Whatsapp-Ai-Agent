@@ -65,10 +65,11 @@ async def _get_current_affairs(chat_id: str) -> str:
     return summary
 
 
-async def _get_syllabus_or_paper(chat_id: str, content_type: str, subject: str = "", year: int = None) -> str:
+async def _get_syllabus_or_paper(chat_id: str, content_type: str, subject: str = "", year: str = None) -> str:
     from bot.fetcher import search_and_fetch
     from bot.rag import retrieve
-    search_and_fetch("HCS", content_type, subject, year)
+    year_int = int(year) if year and str(year).isdigit() else None
+    search_and_fetch("HCS", content_type, subject, year_int)
     context = retrieve(f"HCS {content_type} {subject}")
     if not context:
         context = (

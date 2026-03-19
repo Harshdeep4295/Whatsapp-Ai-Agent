@@ -8,7 +8,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "start_quiz",
-            "description": "Start a practice MCQ quiz. Use when user says 'quiz me', 'practice', 'test me', or asks for questions.",
+            "description": "Start a practice MCQ quiz. Use ONLY when user explicitly requests quiz questions e.g. 'quiz me', 'give me questions', 'practice questions', 'test me on Polity'. Do NOT call for vague messages like 'I want to prepare', 'help me study', 'want to start' — answer those conversationally by asking what they need.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -21,7 +21,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "start_mock_test",
-            "description": "Start a full mock test with multiple questions answered one by one. Optionally restrict to a single topic.",
+            "description": "Start a full timed mock test. Use ONLY when user explicitly says 'mock test', 'full test', 'give me X questions mock'. Do NOT call for 'I want to prepare' or general study requests.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -36,7 +36,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "start_study_session",
-            "description": "Start a guided study session on a topic — teach + quiz combined.",
+            "description": "Start a guided study session on a specific topic — teach + quiz combined. Use ONLY when user names a specific topic e.g. 'let\\'s study Polity', 'study session on Economy', 'teach me Haryana History'. Do NOT call for vague messages like 'I want to prepare for prelims' or 'help me study' — ask what topic they want.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -64,7 +64,7 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "content_type": {"type": "string", "enum": ["syllabus", "paper"]},
                     "subject": {"type": "string"},
-                    "year": {"type": "integer"}
+                    "year": {"type": "string", "description": "4-digit year e.g. '2023'. Omit for latest."}
                 },
                 "required": ["content_type"]
             }
