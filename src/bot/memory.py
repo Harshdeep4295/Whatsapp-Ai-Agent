@@ -1,7 +1,6 @@
-from supabase import create_client
-from config import SUPABASE_URL, SUPABASE_KEY
+from bot.supabase_client import get_sb
 
-sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb = get_sb()
 
 def save_message(chat_id: str, role: str, content: str):
     sb.table("conversations").insert({

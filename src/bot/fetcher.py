@@ -1,14 +1,13 @@
 import httpx
 import uuid
 import fitz
-from ddgs import DDGS
 from bs4 import BeautifulSoup
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from supabase import create_client
+from bot.supabase_client import get_sb
+from bot.web_search import search_web
 from bot.rag import add_to_chromadb
-from config import SUPABASE_URL, SUPABASE_KEY
 
-sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb = get_sb()
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 
 def is_cached(exam: str, content_type: str, subject: str = "") -> bool:
@@ -34,8 +33,7 @@ def search_and_fetch(exam: str, content_type: str,
     chunks, title, source_url = [], "", ""
 
     try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=5))
+        results = search_web(query, max_results=5)
 
         for r in results:
             url = r.get("href", "")

@@ -1,11 +1,10 @@
 import json
 import random
 from datetime import datetime, timezone
-from supabase import create_client
+from bot.supabase_client import get_sb
 from bot.llm import get_client
-from config import SUPABASE_URL, SUPABASE_KEY
 
-sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb = get_sb()
 
 # HCS Prelims syllabus topics — questions will be drawn from these
 HCS_GS_TOPICS = [

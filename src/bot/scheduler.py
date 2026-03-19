@@ -1,12 +1,12 @@
 import hashlib
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from supabase import create_client
+from bot.supabase_client import get_sb
 from bot.news import get_current_affairs
+from bot.web_search import search_web
 from bot.whatsapp import send_message
-from config import SUPABASE_URL, SUPABASE_KEY
 
-sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb = get_sb()
 _scheduler = None
 
 JOB_TYPES = {
@@ -153,10 +153,8 @@ def _generate_content(job: dict) -> tuple[str, str]:
     if jtype in ("syllabus", "explain", "study_material"):
         # Fetch fresh web content on the topic
         try:
-            from ddgs import DDGS
             query = f"{exam} {subject} latest updates {jtype}"
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=5))
+            results = search_web(query, max_results=5)
             if not results:
                 return None, last_hash or ""
             snippets = "\n".join(f"- {r.get('title','')}: {r.get('body','')[:100]}" for r in results)

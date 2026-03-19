@@ -2,6 +2,7 @@ import re
 import hashlib
 import feedparser
 from bot.llm import get_client
+from bot.web_search import search_news
 
 # Multiple feed pools — rotated to get fresh content each time
 FEEDS = [
@@ -38,16 +39,11 @@ def _fetch_all_headlines() -> list[tuple[str, str, str]]:
 
 def _search_fresh_news(exam: str) -> list[tuple[str, str, str]]:
     """Fallback: DuckDuckGo search for latest Haryana news."""
-    try:
-        from ddgs import DDGS
-        with DDGS() as ddgs:
-            results = list(ddgs.news(f"Haryana India current affairs today", max_results=8))
-        return [
-            (r.get("title", ""), r.get("url", ""), r.get("body", "")[:200])
-            for r in results if r.get("title")
-        ]
-    except Exception:
-        return []
+    results = search_news("Haryana India current affairs today", max_results=8)
+    return [
+        (r.get("title", ""), r.get("url", ""), r.get("body", "")[:200])
+        for r in results if r.get("title")
+    ]
 
 def get_current_affairs(exam: str = "General", last_hash: str = None, seen_keys: list = None) -> tuple[str, str, list]:
     """
