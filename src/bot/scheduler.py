@@ -256,6 +256,14 @@ def _generate_nightly_revision(job: dict) -> tuple[str, str]:
     except Exception:
         streak = 0
 
+    # 3b. Get exam countdown
+    try:
+        from bot.memory import get_exam_date, _days_until
+        exam_date = get_exam_date(chat_id)
+        days_left = _days_until(exam_date) if exam_date else None
+    except Exception:
+        days_left = None
+
     # 4. LLM: extract today's topics + key facts from conversations
     today_summary = ""
     if messages:
@@ -284,7 +292,16 @@ def _generate_nightly_revision(job: dict) -> tuple[str, str]:
     date_str = date.today().strftime("%d %b %Y")
     streak_line = f"🔥 Day *{streak}* streak!\n\n" if streak >= 2 else ""
 
-    parts = [f"*📚 Nightly Revision — {date_str}*\n\n{streak_line}"]
+    countdown_line = ""
+    if days_left is not None:
+        if days_left == 0:
+            countdown_line = "🎯 *Today is your HCS exam — all the best!*\n\n"
+        elif days_left <= 7:
+            countdown_line = f"⚠️ *{days_left} days to exam!* Final sprint — maximize revision.\n\n"
+        else:
+            countdown_line = f"⏳ *{days_left} days to your HCS exam.* Stay consistent!\n\n"
+
+    parts = [f"*📚 Nightly Revision — {date_str}*\n\n{streak_line}{countdown_line}"]
 
     if today_summary:
         parts.append(f"*What you covered today:*\n{today_summary}")

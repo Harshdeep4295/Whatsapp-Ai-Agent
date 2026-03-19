@@ -73,3 +73,27 @@ def update_streak(chat_id: str):
         }).eq("chat_id", chat_id).execute()
     except Exception as e:
         print(f"[memory] streak update failed: {e}")
+
+
+def set_exam_date(chat_id: str, exam_date: str):
+    """Store exam date as ISO string e.g. '2026-06-15'."""
+    sb.table("user_profiles").upsert({"chat_id": chat_id, "exam_date": exam_date}).execute()
+
+
+def get_exam_date(chat_id: str) -> str | None:
+    """Return stored exam_date string or None."""
+    res = sb.table("user_profiles").select("exam_date").eq("chat_id", chat_id).execute()
+    if res.data:
+        return res.data[0].get("exam_date")
+    return None
+
+
+def _days_until(exam_date: str) -> int | None:
+    """Return days from today to exam_date, or None if date is past or invalid."""
+    try:
+        from datetime import date
+        target = date.fromisoformat(exam_date)
+        delta = (target - date.today()).days
+        return delta if delta >= 0 else None
+    except Exception:
+        return None

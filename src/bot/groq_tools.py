@@ -21,11 +21,12 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "start_mock_test",
-            "description": "Start a full mock test with multiple questions answered one by one.",
+            "description": "Start a full mock test with multiple questions answered one by one. Optionally restrict to a single topic.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "question_count": {"type": "integer", "description": "Number of questions (1-50, default 10)"}
+                    "question_count": {"type": "integer", "description": "Number of questions (1-50, default 10)"},
+                    "topic": {"type": "string", "description": "Optional. Restrict all questions to this HCS topic e.g. 'Polity', 'Haryana History', 'Economy'. Omit for mixed topics."}
                 },
                 "required": ["question_count"]
             }
@@ -98,6 +99,40 @@ TOOL_SCHEMAS = [
             "name": "cancel_scheduled_updates",
             "description": "Cancel all active scheduled updates for this user.",
             "parameters": {"type": "object", "properties": {}}
+        }
+    }
+    ,
+    {
+        "type": "function",
+        "function": {
+            "name": "get_wrong_answers",
+            "description": "Show the user questions they got wrong, with the correct answer and explanation. Use when user says 'show my wrong answers', 'what did I get wrong', 'review my mistakes', or 'wrong answers on [topic]'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Optional HCS topic to filter by e.g. 'Polity', 'Haryana History'. Omit to show wrong answers across all topics."
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_exam_date",
+            "description": "Save the user's HCS exam date so the bot can show a countdown. Use when user says things like 'my exam is on June 15', 'HCS exam date is 2026-06-20', or 'set my exam date'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "exam_date": {
+                        "type": "string",
+                        "description": "Exam date in ISO format YYYY-MM-DD e.g. '2026-06-15'"
+                    }
+                },
+                "required": ["exam_date"]
+            }
         }
     }
 ]

@@ -12,6 +12,8 @@ async def execute_tool(name: str, inputs: dict, chat_id: str) -> str:
         "get_user_progress": _get_user_progress,
         "schedule_updates": _schedule_updates,
         "cancel_scheduled_updates": _cancel_scheduled_updates,
+        "get_wrong_answers": _get_wrong_answers,
+        "set_exam_date": _set_exam_date,
     }
     fn = fns.get(name)
     if not fn:
@@ -32,14 +34,15 @@ async def _start_quiz(chat_id: str, subject: str = None) -> str:
     return "Quiz started — 5 questions sent to user."
 
 
-async def _start_mock_test(chat_id: str, question_count: int = 10) -> str:
+async def _start_mock_test(chat_id: str, question_count: int = 10, topic: str = None) -> str:
     from bot.quiz import start_mock_test
-    text, q_data = start_mock_test(chat_id, question_count)
+    text, q_data = start_mock_test(chat_id, question_count, topic=topic)
     save_message(chat_id, "assistant", text)
     await send_message(chat_id, text)
     if q_data:
         await send_interactive_quiz(chat_id, q_data["question"], q_data["options"], q_data.get("topic", ""))
-    return f"Mock test started — {question_count} questions."
+    label = f"on {topic}" if topic else f"{question_count} questions"
+    return f"Mock test started — {label}."
 
 
 async def _start_study_session(chat_id: str, topic: str) -> str:
@@ -131,3 +134,53 @@ async def _schedule_updates(chat_id: str, job_type: str, interval_text: str) -> 
 async def _cancel_scheduled_updates(chat_id: str) -> str:
     from bot.scheduler import cancel_jobs
     return cancel_jobs(chat_id)
+
+
+async def _get_wrong_answers(chat_id: str, topic: str = None) -> str:
+    from bot.supabase_client import get_sb
+    _sb = get_sb()
+    try:
+        query = _sb.table("user_answer_history")\
+            .select("topic,question_text,options,correct_answer,user_answer,explanation")\
+            .eq("chat_id", chat_id)\
+            .eq("is_correct", False)\
+            .order("attempted_at", desc=True)\
+            .limit(10)
+        if topic:
+            query = query.eq("topic", topic)
+        res = query.execute()
+        rows = res.data or []
+
+        if not rows:
+            msg = "No wrong answers recorded"
+            msg += f" for *{topic}*" if topic else ""
+            msg += " yet. Keep practising! 🎉"
+            return msg
+
+        header = "*Your Recent Wrong Answers"
+        header += f" — {topic}*\n\n" if topic else "*\n\n"
+        lines = []
+        for i, r in enumerate(rows, 1):
+            opts = r.get("options", {})
+            correct_text = opts.get(r["correct_answer"], r["correct_answer"])
+            user_text = opts.get(r["user_answer"], r["user_answer"])
+            lines.append(
+                f"*{i}. [{r['topic']}]* {r['question_text']}\n"
+                f"   You answered: *{r['user_answer']}* — {user_text}\n"
+                f"   Correct: *{r['correct_answer']}* — {correct_text}\n"
+                f"   _{r.get('explanation', '')}_"
+            )
+        return header + "\n\n".join(lines)
+    except Exception as e:
+        return "Couldn't load wrong answers right now. Try again in a moment."
+
+
+async def _set_exam_date(chat_id: str, exam_date: str) -> str:
+    from bot.memory import set_exam_date, _days_until
+    set_exam_date(chat_id, exam_date)
+    days = _days_until(exam_date)
+    if days is None:
+        return f"Exam date set to {exam_date}. (That date appears to be in the past — double-check?)"
+    if days == 0:
+        return "Exam date set — that's TODAY! All the best! 🎯"
+    return f"Exam date set to {exam_date}. *{days} days to go!* Let's make them count. 💪"

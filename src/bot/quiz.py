@@ -47,7 +47,7 @@ The question must:
 Return ONLY valid JSON, nothing else:
 {{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"one clear sentence explaining why"}}"""
 
-MOCK_TEST_PROMPT = """Generate exactly {n} HCS (Haryana Civil Services) Prelims style MCQs across different topics from this list: {topics}
+MOCK_TEST_PROMPT = """Generate exactly {n} HCS (Haryana Civil Services) Prelims style MCQs {topic_constraint}.
 
 Each question must match actual HPSC exam style and test conceptual understanding.
 
@@ -99,7 +99,17 @@ def _get_adaptive_topic(chat_id: str, subject: str) -> str:
     return random.choice(weighted)
 
 
-def _update_progress(chat_id: str, topic: str, is_correct: bool):
+def _update_progress(
+    chat_id: str,
+    topic: str,
+    is_correct: bool,
+    question_text: str = "",
+    options: dict = None,
+    correct_answer: str = "",
+    user_answer: str = "",
+    explanation: str = "",
+    source: str = "quiz",
+):
     """Upsert user_progress for this topic."""
     try:
         res = sb.table("user_progress").select("correct,total")\
@@ -119,6 +129,21 @@ def _update_progress(chat_id: str, topic: str, is_correct: bool):
             }).execute()
     except Exception as e:
         print(f"[quiz] progress update failed: {e}")
+
+    try:
+        sb.table("user_answer_history").insert({
+            "chat_id": chat_id,
+            "topic": topic,
+            "question_text": question_text,
+            "options": options or {},
+            "correct_answer": correct_answer,
+            "user_answer": user_answer,
+            "is_correct": is_correct,
+            "explanation": explanation,
+            "source": source,
+        }).execute()
+    except Exception as e:
+        print(f"[quiz] answer history insert failed: {e}")
 
 
 def _generate(subject: str) -> dict:
@@ -205,7 +230,17 @@ def check_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]:
     new_score = s["score"] + (1 if is_right else 0)
     new_total = s["total"] + 1
 
-    _update_progress(chat_id, s["subject"], is_right)
+    _update_progress(
+        chat_id,
+        s["subject"],
+        is_right,
+        question_text=s["question"],
+        options=s["options"],
+        correct_answer=s["correct_answer"],
+        user_answer=letter,
+        explanation=s.get("explanation", ""),
+        source="quiz",
+    )
 
     if is_right:
         result = f"*Correct!* 🎉\n\n{s['explanation']}"
@@ -247,15 +282,19 @@ def has_active_quiz(chat_id: str) -> bool:
     return bool(res.data)
 
 
-def start_batch_quiz(chat_id: str, n: int = 5) -> tuple[str, None]:
+def start_batch_quiz(chat_id: str, n: int = 5, topic: str = None) -> tuple[str, None]:
     """Generate n questions, send them all as a numbered list in one message.
     Answers are processed one by one via check_mock_answer (reuses mock_tests table)."""
-    all_topics = HCS_GS_TOPICS + HCS_CSAT_TOPICS
-    topics_str = ", ".join(all_topics)
+    if topic:
+        topic_constraint = f"strictly on the topic: {topic}"
+    else:
+        all_topics = HCS_GS_TOPICS + HCS_CSAT_TOPICS
+        topics_str = ", ".join(all_topics)
+        topic_constraint = f"across different topics from this list: {topics_str}"
     client = get_client()
     r = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(n=n, topics=topics_str)}],
+        messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(n=n, topic_constraint=topic_constraint)}],
         max_tokens=n * 220,
         temperature=0.85,
     )
@@ -290,13 +329,17 @@ def start_batch_quiz(chat_id: str, n: int = 5) -> tuple[str, None]:
 
 # ── Mock Test ────────────────────────────────────────────────────────────────
 
-def start_mock_test(chat_id: str, n: int = 10) -> str:
-    all_topics = HCS_GS_TOPICS + HCS_CSAT_TOPICS
-    topics_str = ", ".join(all_topics)
+def start_mock_test(chat_id: str, n: int = 10, topic: str = None) -> str:
+    if topic:
+        topic_constraint = f"strictly on the topic: {topic}"
+    else:
+        all_topics = HCS_GS_TOPICS + HCS_CSAT_TOPICS
+        topics_str = ", ".join(all_topics)
+        topic_constraint = f"across different topics from this list: {topics_str}"
     client = get_client()
     r = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(n=n, topics=topics_str)}],
+        messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(n=n, topic_constraint=topic_constraint)}],
         max_tokens=n * 220,
         temperature=0.85,
     )
@@ -343,7 +386,17 @@ def check_mock_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]
 
     topic = q.get("topic", "General")
     answers.append({"q": idx, "answer": letter, "correct": is_right, "topic": topic})
-    _update_progress(chat_id, topic, is_right)
+    _update_progress(
+        chat_id,
+        topic,
+        is_right,
+        question_text=q.get("question", ""),
+        options=q.get("options", {}),
+        correct_answer=correct,
+        user_answer=letter,
+        explanation=q.get("explanation", ""),
+        source="mock",
+    )
 
     if is_right:
         feedback = f"*Correct!* ✅\n{q['explanation']}"
@@ -417,7 +470,17 @@ def check_study_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None
     correct = q["correct"]
     is_right = letter == correct
 
-    _update_progress(chat_id, q["topic"], is_right)
+    _update_progress(
+        chat_id,
+        q["topic"],
+        is_right,
+        question_text=q.get("question", ""),
+        options=q.get("options", {}),
+        correct_answer=q.get("correct", ""),
+        user_answer=letter,
+        explanation=q.get("explanation", ""),
+        source="study",
+    )
 
     if is_right:
         feedback = f"*Correct!* 🎉\n{q['explanation']}"

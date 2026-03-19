@@ -1,5 +1,8 @@
 from bot.groq_tools import run_tool_loop
-from bot.memory import save_message, get_history, get_current_topic, set_current_topic, update_streak
+from bot.memory import (
+    save_message, get_history, get_current_topic, set_current_topic,
+    update_streak, get_exam_date, _days_until,
+)
 from bot.quiz import (
     has_active_quiz, check_answer, stop_quiz,
     has_active_mock_test, check_mock_answer,
@@ -69,7 +72,18 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
                     worst = min(weak, key=lambda x: x[1])
                     pct = int(worst[1] * 100)
                     weak_line = f"\n\n📊 *Focus today:* {worst[0]} ({pct}% accuracy) — say *study {worst[0]}* to drill it."
-            reply = f"Hey! 👋 {streak_line}Good to see you back.\n\nWhat do you need — quiz, mock test, syllabus, current affairs, or study plan?{weak_line}"
+            countdown_line = ""
+            try:
+                exam_date = get_exam_date(chat_id)
+                if exam_date:
+                    days = _days_until(exam_date)
+                    if days == 0:
+                        countdown_line = "\n\n🎯 *Today is your HCS exam day! All the best!*"
+                    elif days is not None:
+                        countdown_line = f"\n\n⏳ *{days} days left* until your HCS exam ({exam_date})."
+            except Exception:
+                countdown_line = ""
+            reply = f"Hey! 👋 {streak_line}Good to see you back.\n\nWhat do you need — quiz, mock test, syllabus, current affairs, or study plan?{weak_line}{countdown_line}"
         except Exception:
             reply = "Hey! 👋 Good to see you again. Ready to continue HCS prep?\n\nWhat do you need — quiz, mock test, syllabus, current affairs, or study plan?"
         save_message(chat_id, "assistant", reply)
