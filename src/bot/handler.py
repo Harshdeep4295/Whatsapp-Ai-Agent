@@ -6,11 +6,12 @@ from bot.memory import save_message, get_history, get_current_topic, set_current
 from bot.fetcher import search_and_fetch
 from bot.quiz import (
     start_quiz, check_answer, stop_quiz, has_active_quiz,
-    start_mock_test, check_mock_answer, has_active_mock_test,
+    start_batch_quiz, start_mock_test, check_mock_answer, has_active_mock_test,
     start_study_session, check_study_answer, has_active_study_session,
 )
 from bot.news import get_current_affairs
 from bot.scheduler import schedule_job, cancel_jobs, parse_interval, JOB_TYPES
+from bot.whatsapp import send_message, send_interactive_quiz
 
 EXAM = "HCS"  # Hardcoded — this bot is for HCS only
 
@@ -44,7 +45,15 @@ def _parse_mock_count(text: str, parsed_count) -> int:
     return 10
 
 
-async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bool = False) -> str:
+async def _quiz_reply(chat_id: str, text: str, q_data: dict | None) -> None:
+    """Send quiz feedback as text, then question as interactive list if present. Returns None."""
+    save_message(chat_id, "assistant", text)
+    await send_message(chat_id, text)
+    if q_data:
+        await send_interactive_quiz(chat_id, q_data["question"], q_data["options"], q_data.get("topic", ""))
+
+
+async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bool = False) -> str | None:
     save_message(chat_id, "user", user_text)
     lower = user_text.strip().lower()
 
@@ -78,13 +87,11 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             from config import SUPABASE_URL, SUPABASE_KEY
             sb = create_client(SUPABASE_URL, SUPABASE_KEY)
             sb.table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
-            reply = "Mock test ended."
-            save_message(chat_id, "assistant", reply)
-            return reply
+            await _quiz_reply(chat_id, "Mock test ended.", None)
+            return None
         if len(lower) <= 2 or lower in ["a", "b", "c", "d"]:
-            reply = check_mock_answer(chat_id, user_text)
-            save_message(chat_id, "assistant", reply)
-            return reply
+            await _quiz_reply(chat_id, *check_mock_answer(chat_id, user_text))
+            return None
 
     # --- Active study session intercept ---
     if has_active_study_session(chat_id):
@@ -92,24 +99,20 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             from bot.memory import set_study_session
             set_study_session(chat_id, None)
             set_current_topic(chat_id, None)
-            reply = "Study session ended."
-            save_message(chat_id, "assistant", reply)
-            return reply
+            await _quiz_reply(chat_id, "Study session ended.", None)
+            return None
         if len(lower) <= 2 or lower in ["a", "b", "c", "d"]:
-            reply = check_study_answer(chat_id, user_text)
-            save_message(chat_id, "assistant", reply)
-            return reply
+            await _quiz_reply(chat_id, *check_study_answer(chat_id, user_text))
+            return None
 
     # --- Mid-quiz intercept ---
     if has_active_quiz(chat_id):
         if lower in STOP_PHRASES:
-            reply = stop_quiz(chat_id)
-            save_message(chat_id, "assistant", reply)
-            return reply
+            await _quiz_reply(chat_id, *stop_quiz(chat_id))
+            return None
         if len(lower) <= 2 or lower in ["a", "b", "c", "d"]:
-            reply = check_answer(chat_id, user_text)
-            save_message(chat_id, "assistant", reply)
-            return reply
+            await _quiz_reply(chat_id, *check_answer(chat_id, user_text))
+            return None
 
     # --- Intent detection ---
     parsed = detect_intent(user_text)
@@ -138,17 +141,21 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
 
     elif intent == "MOCK_TEST":
         n = _parse_mock_count(user_text, parsed.get("count"))
-        reply = start_mock_test(chat_id, n)
+        await _quiz_reply(chat_id, *start_mock_test(chat_id, n))
+        return None
 
     elif intent == "STUDY_SESSION":
         topic = subject or "General Studies"
         set_current_topic(chat_id, topic)
-        reply = start_study_session(chat_id, topic)
+        await _quiz_reply(chat_id, *start_study_session(chat_id, topic))
+        return None
 
     elif intent == "QUIZ":
         if subject:
             set_current_topic(chat_id, subject)
-        reply = start_quiz(chat_id, EXAM, subject)
+        # Default: send 5 questions at once as a numbered list
+        await _quiz_reply(chat_id, *start_batch_quiz(chat_id, 5))
+        return None
 
     elif intent == "NEWS":
         reply, _ = get_current_affairs(EXAM)

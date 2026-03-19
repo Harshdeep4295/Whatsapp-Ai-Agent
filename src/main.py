@@ -64,5 +64,6 @@ async def webhook(request: Request):
     if result:
         chat_id, sender, text, is_group = result
         reply = await handle_message(chat_id, sender, text, is_group)
-        await send_message(chat_id if is_group else sender, reply)
+        if reply is not None:
+            await send_message(chat_id if is_group else sender, reply)
     return {"status": "ok"}

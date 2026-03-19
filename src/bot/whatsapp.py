@@ -19,38 +19,63 @@ async def send_message(to: str, text: str):
         if r.status_code != 200:
             print(f"[whatsapp] send failed {r.status_code}: {r.text}")
 
+
+async def send_interactive_quiz(to: str, question: str, options: dict, topic: str = ""):
+    """Send quiz question as an interactive list with A/B/C/D tappable rows."""
+    rows = [{"id": k, "title": f"{k}. {v[:72]}"} for k, v in options.items()]
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "header": {"type": "text", "text": (topic or "HCS Quiz")[:60]},
+            "body": {"text": question[:1024]},
+            "footer": {"text": "Tap to select your answer"},
+            "action": {
+                "button": "Choose Answer",
+                "sections": [{"title": "Options", "rows": rows}],
+            },
+        },
+    }
+    async with httpx.AsyncClient() as client:
+        r = await client.post(GRAPH_URL, json=payload, headers=HEADERS)
+        if r.status_code != 200:
+            print(f"[whatsapp] interactive quiz send failed {r.status_code}: {r.text}")
+
+
 def parse_webhook(body: dict) -> tuple | None:
     """
     Returns (chat_id, sender_phone, text, is_group).
     chat_id = group_id for groups, sender phone for DMs.
+    Handles both text messages and interactive replies (list/button taps).
     """
     try:
         entry = body["entry"][0]["changes"][0]["value"]
         msg = entry["messages"][0]
-        if msg["type"] != "text":
+        sender = msg["from"]
+        msg_type = msg["type"]
+
+        # Extract text from plain text or interactive tap responses
+        if msg_type == "text":
+            text = msg["text"]["body"]
+        elif msg_type == "interactive":
+            interactive = msg.get("interactive", {})
+            itype = interactive.get("type")
+            if itype == "list_reply":
+                text = interactive["list_reply"]["id"]   # "A", "B", "C", or "D"
+            elif itype == "button_reply":
+                text = interactive["button_reply"]["id"]
+            else:
+                return None
+        else:
             return None
 
-        sender = msg["from"]
-        text = msg["text"]["body"]
-
-        # Group messages have a "context" with group id, or the recipient is a group JID
-        # Meta sends group_id in entry.changes.value.metadata or msg context
-        metadata = entry.get("metadata", {})
+        # Group detection: use explicit group field only.
+        # NOTE: msg["context"]["from"] fires on ALL DM replies (it's the quoted message sender,
+        # not a group indicator) — do NOT use it for group detection.
         group_id = None
-
-        # Check if message came from a group (group JIDs contain @g.us in some SDKs,
-        # but Meta Cloud API uses a numeric group ID in msg["context"]["from"] or
-        # the "recipient_id" field when the bot is mentioned)
-        contacts = entry.get("contacts", [{}])
-        recipient_id = metadata.get("display_phone_number")
-
-        # Meta Cloud API: group messages include msg["context"]["from"] pointing to group
-        ctx = msg.get("context", {})
-        if ctx.get("from") and ctx["from"] != sender:
-            group_id = ctx["from"]
-
-        # Alternative: some group payloads include a "group" key
-        if not group_id and msg.get("group"):
+        if msg.get("group"):
             group_id = msg["group"].get("id")
 
         is_group = group_id is not None

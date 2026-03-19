@@ -168,7 +168,7 @@ def _mock_report(questions: list, answers: list, n: int) -> str:
 
 # ── Regular Quiz ────────────────────────────────────────────────────────────
 
-def start_quiz(chat_id: str, exam: str, subject: str) -> str:
+def start_quiz(chat_id: str, exam: str, subject: str) -> tuple[str, dict]:
     topic = _get_adaptive_topic(chat_id, subject)
     q = _generate(topic)
     sb.table("quiz_sessions").upsert({
@@ -177,14 +177,17 @@ def start_quiz(chat_id: str, exam: str, subject: str) -> str:
         "correct_answer": q["correct"], "explanation": q["explanation"],
         "active": True, "score": 0, "total": 0,
     }, on_conflict="chat_id").execute()
-    return f"Alright, HCS quiz time! 🎯\n\n" + _fmt(q)
+    return (
+        "Alright, HCS quiz time! 🎯",
+        {"question": q["question"], "options": q["options"], "topic": q.get("_topic", topic)},
+    )
 
 
-def check_answer(chat_id: str, user_answer: str) -> str:
+def check_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]:
     res = sb.table("quiz_sessions").select("*")\
         .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
     if not res.data:
-        return "No active quiz. Send *quiz me* to start one!"
+        return "No active quiz. Send *quiz me* to start one!", None
 
     s = res.data[0]
     letter = user_answer.strip().upper()[0]
@@ -200,7 +203,7 @@ def check_answer(chat_id: str, user_answer: str) -> str:
     else:
         result = f"*Not quite.* The answer is *{correct}*: {s['options'][correct]}\n\n{s['explanation']}"
 
-    result += f"\n\nScore: *{new_score}/{new_total}*\n\n"
+    result += f"\n\nScore: *{new_score}/{new_total}*\n\nNext one 👇"
 
     next_topic = _get_adaptive_topic(chat_id, "")
     next_q = _generate(next_topic)
@@ -211,10 +214,13 @@ def check_answer(chat_id: str, user_answer: str) -> str:
         "score": new_score, "total": new_total,
     }).eq("chat_id", chat_id).execute()
 
-    return result + "Next one 👇\n\n" + _fmt(next_q)
+    return (
+        result,
+        {"question": next_q["question"], "options": next_q["options"], "topic": next_q.get("_topic", next_topic)},
+    )
 
 
-def stop_quiz(chat_id: str) -> str:
+def stop_quiz(chat_id: str) -> tuple[str, None]:
     res = sb.table("quiz_sessions").select("score,total")\
         .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
     sb.table("quiz_sessions").update({"active": False}).eq("chat_id", chat_id).execute()
@@ -222,14 +228,55 @@ def stop_quiz(chat_id: str) -> str:
         d = res.data[0]
         pct = int(d["score"] / d["total"] * 100) if d["total"] else 0
         msg = "Amazing! 🔥" if pct >= 80 else "Good effort! Keep going 💪" if pct >= 50 else "Keep practicing, you'll get there! 📚"
-        return f"Quiz done!\n\nFinal score: *{d['score']}/{d['total']}* ({pct}%)\n\n{msg}"
-    return "Quiz ended."
+        return f"Quiz done!\n\nFinal score: *{d['score']}/{d['total']}* ({pct}%)\n\n{msg}", None
+    return "Quiz ended.", None
 
 
 def has_active_quiz(chat_id: str) -> bool:
     res = sb.table("quiz_sessions").select("id")\
         .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
     return bool(res.data)
+
+
+def start_batch_quiz(chat_id: str, n: int = 5) -> tuple[str, None]:
+    """Generate n questions, send them all as a numbered list in one message.
+    Answers are processed one by one via check_mock_answer (reuses mock_tests table)."""
+    all_topics = HCS_GS_TOPICS + HCS_CSAT_TOPICS
+    topics_str = ", ".join(all_topics)
+    client = get_client()
+    r = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(n=n, topics=topics_str)}],
+        max_tokens=n * 220,
+        temperature=0.85,
+    )
+    raw = r.choices[0].message.content.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    questions = json.loads(raw.strip())
+
+    # Deactivate any existing mock test
+    sb.table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
+    sb.table("mock_tests").insert({
+        "chat_id": chat_id,
+        "questions": questions,
+        "answers": [],
+        "current_idx": 0,
+        "active": True,
+    }).execute()
+
+    # Format all questions in one message
+    lines = [f"*Quiz Round — {n} Questions* 📋\n"]
+    for i, q in enumerate(questions, 1):
+        topic = q.get("topic", "")
+        topic_line = f"_{topic}_\n" if topic else ""
+        opts = "\n".join(f"*{k}.* {v}" for k, v in q["options"].items())
+        lines.append(f"*Q{i}.* {topic_line}{q['question']}\n{opts}")
+    lines.append("\n_Answer Q1 first — reply A, B, C, or D_")
+
+    return "\n\n".join(lines), None
 
 
 # ── Mock Test ────────────────────────────────────────────────────────────────
@@ -262,15 +309,17 @@ def start_mock_test(chat_id: str, n: int = 10) -> str:
     }).execute()
 
     q = questions[0]
-    q["_topic"] = q.get("topic", "")
-    return f"*Mock Test — {n} Questions* 📝\n\nQuestion 1/{n}:\n\n" + _fmt(q)
+    return (
+        f"*Mock Test — {n} Questions* 📝\n\nQuestion 1/{n}:",
+        {"question": q["question"], "options": q["options"], "topic": q.get("topic", "")},
+    )
 
 
-def check_mock_answer(chat_id: str, user_answer: str) -> str:
+def check_mock_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]:
     res = sb.table("mock_tests").select("*")\
         .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
     if not res.data:
-        return "No active mock test. Send *mock test* to start one!"
+        return "No active mock test. Send *mock test* to start one!", None
 
     test = res.data[0]
     questions = test["questions"]
@@ -298,14 +347,16 @@ def check_mock_answer(chat_id: str, user_answer: str) -> str:
         sb.table("mock_tests").update({
             "answers": answers, "active": False, "current_idx": next_idx
         }).eq("id", test["id"]).execute()
-        return feedback + "\n\n" + _mock_report(questions, answers, n)
+        return feedback + "\n\n" + _mock_report(questions, answers, n), None
     else:
         sb.table("mock_tests").update({
             "answers": answers, "current_idx": next_idx
         }).eq("id", test["id"]).execute()
         next_q = questions[next_idx]
-        next_q["_topic"] = next_q.get("topic", "")
-        return feedback + f"\n\nQuestion {next_idx + 1}/{n}:\n\n" + _fmt(next_q)
+        return (
+            feedback + f"\n\nQuestion {next_idx + 1}/{n}:",
+            {"question": next_q["question"], "options": next_q["options"], "topic": next_q.get("topic", "")},
+        )
 
 
 def has_active_mock_test(chat_id: str) -> bool:
@@ -340,14 +391,17 @@ def start_study_session(chat_id: str, topic: str) -> str:
     sess["pending_q"] = session_q
     set_study_session(chat_id, sess)
 
-    return f"{overview}\n\n*Question 1/3:*\n\n" + _fmt(first_q)
+    return (
+        f"{overview}\n\n*Question 1/3:*",
+        {"question": first_q["question"], "options": first_q["options"], "topic": topic},
+    )
 
 
-def check_study_answer(chat_id: str, user_answer: str) -> str:
+def check_study_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]:
     from bot.memory import get_study_session, set_study_session, set_current_topic
     sess = get_study_session(chat_id)
     if not sess or "pending_q" not in sess:
-        return "No active study session. Say *let's study [topic]* to start one!"
+        return "No active study session. Say *let's study [topic]* to start one!", None
 
     q = sess["pending_q"]
     letter = user_answer.strip().upper()[0]
@@ -375,7 +429,7 @@ def check_study_answer(chat_id: str, user_answer: str) -> str:
         set_current_topic(chat_id, None)
         msg = "Great job! 🔥" if pct >= 80 else "Good effort! 💪" if pct >= 50 else "More practice needed! 📚"
         summary = f"\n\n*Session Summary — {topic}*\nScore: *{correct_count}/{max_q}* ({pct}%) {msg}"
-        return feedback + summary
+        return feedback + summary, None
     else:
         next_q_data = _generate(topic)
         sess["pending_q"] = {
@@ -384,7 +438,10 @@ def check_study_answer(chat_id: str, user_answer: str) -> str:
             "topic": topic,
         }
         set_study_session(chat_id, sess)
-        return feedback + f"\n\n*Question {q_count + 1}/{max_q}:*\n\n" + _fmt(next_q_data)
+        return (
+            feedback + f"\n\n*Question {q_count + 1}/{max_q}:*",
+            {"question": next_q_data["question"], "options": next_q_data["options"], "topic": topic},
+        )
 
 
 def has_active_study_session(chat_id: str) -> bool:
