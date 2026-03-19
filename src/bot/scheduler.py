@@ -119,7 +119,14 @@ def _generate_content(job: dict) -> tuple[str, str]:
     last_hash = job.get("last_content_hash")
 
     if jtype == "current_affairs":
-        return get_current_affairs(exam, last_hash=last_hash)
+        seen_keys = job.get("seen_keys") or []
+        content, content_hash, new_seen_keys = get_current_affairs(exam, last_hash=last_hash, seen_keys=seen_keys)
+        if new_seen_keys:
+            try:
+                sb.table("scheduled_jobs").update({"seen_keys": new_seen_keys}).eq("id", job["id"]).execute()
+            except Exception as e:
+                print(f"[scheduler] seen_keys update failed: {e}")
+        return content, content_hash
 
     if jtype == "quiz":
         # Quiz questions are LLM-generated with high temperature — always unique

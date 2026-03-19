@@ -7,17 +7,57 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
-async def send_message(to: str, text: str):
+_CHUNK_LIMIT = 3800  # leave headroom below WhatsApp's 4096 char limit
+
+
+def _split_message(text: str) -> list[str]:
+    """Split text into chunks ≤ _CHUNK_LIMIT, breaking on paragraph then line boundaries."""
+    if len(text) <= _CHUNK_LIMIT:
+        return [text]
+
+    chunks = []
+    remaining = text
+
+    while len(remaining) > _CHUNK_LIMIT:
+        # Try to break on a double newline (paragraph boundary) within the limit
+        split_at = remaining.rfind("\n\n", 0, _CHUNK_LIMIT)
+        if split_at == -1:
+            # Fall back to single newline
+            split_at = remaining.rfind("\n", 0, _CHUNK_LIMIT)
+        if split_at == -1:
+            # Hard split at limit
+            split_at = _CHUNK_LIMIT
+
+        chunks.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+
+    if remaining:
+        chunks.append(remaining)
+
+    # Add part indicators if more than one chunk
+    if len(chunks) > 1:
+        chunks = [f"{c}\n\n_({i+1}/{len(chunks)})_" for i, c in enumerate(chunks)]
+
+    return chunks
+
+
+async def _send_single(client: httpx.AsyncClient, to: str, text: str):
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
         "type": "text",
-        "text": {"body": text[:4000]},
+        "text": {"body": text},
     }
+    r = await client.post(GRAPH_URL, json=payload, headers=HEADERS)
+    if r.status_code != 200:
+        print(f"[whatsapp] send failed {r.status_code}: {r.text}")
+
+
+async def send_message(to: str, text: str):
+    parts = _split_message(text)
     async with httpx.AsyncClient() as client:
-        r = await client.post(GRAPH_URL, json=payload, headers=HEADERS)
-        if r.status_code != 200:
-            print(f"[whatsapp] send failed {r.status_code}: {r.text}")
+        for part in parts:
+            await _send_single(client, to, part)
 
 
 async def send_interactive_quiz(to: str, question: str, options: dict, topic: str = ""):

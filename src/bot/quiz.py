@@ -55,7 +55,17 @@ Each question must match actual HPSC exam style and test conceptual understandin
 Return ONLY a valid JSON array, nothing else:
 [{{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"one clear sentence","topic":"topic name"}}]"""
 
-STUDY_OVERVIEW_PROMPT = """You are Yudhister, an HCS exam prep tutor. Give a brief, engaging 2-3 line overview of "{topic}" for an HCS Prelims student. Then say "Let's start with 3 warm-up questions!" Keep it friendly and concise."""
+STUDY_OVERVIEW_PROMPT = """You are Yudhister, a professor with 20+ years of experience teaching HCS (Haryana Civil Services) exam aspirants.
+
+A student wants to study: "{topic}"
+
+Write a study session intro that covers:
+1. What this topic is and its 2-3 key sub-areas (be specific — name them)
+2. Why it matters for HCS Prelims (typical question count or exam importance)
+3. 2-3 actual important facts or concepts a student must remember
+4. End with: "Let's test your knowledge with 3 warm-up questions!"
+
+Keep it under 150 words. Friendly and specific."""
 
 
 def _get_adaptive_topic(chat_id: str, subject: str) -> str:
@@ -373,7 +383,7 @@ def start_study_session(chat_id: str, topic: str) -> str:
     r = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": STUDY_OVERVIEW_PROMPT.format(topic=topic)}],
-        max_tokens=150,
+        max_tokens=300,
         temperature=0.7,
     )
     overview = r.choices[0].message.content.strip()

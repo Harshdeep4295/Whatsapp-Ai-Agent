@@ -158,7 +158,7 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         return None
 
     elif intent == "NEWS":
-        reply, _ = get_current_affairs(EXAM)
+        reply, _, _ = get_current_affairs(EXAM)
         if not reply:
             reply = "Couldn't fetch news right now. Try again in a bit!"
 
@@ -166,18 +166,26 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         ctype = "syllabus" if intent == "SYLLABUS" else "paper"
         search_and_fetch(EXAM, ctype, subject, year)
         context = retrieve(user_text)
+        if not context:
+            context = (
+                "HCS Prelims Paper 1 GS (100 marks): Indian History & Culture, Haryana History & Culture, "
+                "Indian Geography, Haryana Geography, Indian Polity & Constitution, Panchayati Raj, "
+                "Indian Economy, Haryana Economy & Agriculture, Science & Technology, Environment & Ecology, "
+                "Current Affairs, Important Govt Schemes. "
+                "Paper 2 CSAT (80 marks): Reading Comprehension, Logical Reasoning, Analytical Ability, "
+                "Data Interpretation, Basic Numeracy, Decision Making. "
+                "Haryana-specific content is ~30% of GS — History, Geography, Economy, Culture, Art, Personalities."
+            )
         history = get_history(chat_id)
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
-        depth = "full" if subject else "short"
-        reply = chat(messages, context=context, depth=depth, current_topic=current_topic)
+        reply = chat(messages, context=context, depth="full", current_topic=current_topic)
 
     elif intent == "EXPLAIN":
         context = retrieve(user_text)
         history = get_history(chat_id)
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
-        is_expanding = any(p in lower for p in EXPAND_PHRASES)
-        reply = chat(messages, context=context, depth="full" if is_expanding else "short",
-                     current_topic=current_topic)
+        reply = chat(messages, context=context, depth="full", current_topic=current_topic)
+        reply += "\n\n_Want a quick MCQ on this to test yourself? Say *quiz me* or yes._"
 
     elif intent == "STUDY_PLAN":
         history = get_history(chat_id)
