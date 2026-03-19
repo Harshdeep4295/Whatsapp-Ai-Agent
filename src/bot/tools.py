@@ -31,7 +31,7 @@ async def _start_quiz(chat_id: str, subject: str = None) -> str:
     await send_message(chat_id, text)
     if q_data:
         await send_interactive_quiz(chat_id, q_data["question"], q_data["options"], q_data.get("topic", ""))
-    return "Quiz started — 5 questions sent to user."
+    return "✅ Quiz with 5 questions has been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence like 'Good luck! 🎯' — do NOT generate any questions or answer choices in your reply."
 
 
 async def _start_mock_test(chat_id: str, question_count: int = 10, topic: str = None) -> str:
@@ -42,7 +42,7 @@ async def _start_mock_test(chat_id: str, question_count: int = 10, topic: str = 
     if q_data:
         await send_interactive_quiz(chat_id, q_data["question"], q_data["options"], q_data.get("topic", ""))
     label = f"on {topic}" if topic else f"{question_count} questions"
-    return f"Mock test started — {label}."
+    return f"✅ Mock test ({label}) has been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence like 'Good luck! 🎯' — do NOT generate any questions or answer choices in your reply."
 
 
 async def _start_study_session(chat_id: str, topic: str) -> str:
@@ -54,7 +54,7 @@ async def _start_study_session(chat_id: str, topic: str) -> str:
     await send_message(chat_id, text)
     if q_data:
         await send_interactive_quiz(chat_id, q_data["question"], q_data["options"], q_data.get("topic", ""))
-    return f"Study session on '{topic}' started."
+    return f"✅ Study session on '{topic}' with overview and first question has been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence — do NOT write a study plan, do NOT generate questions, do NOT repeat any content."
 
 
 async def _get_current_affairs(chat_id: str) -> str:

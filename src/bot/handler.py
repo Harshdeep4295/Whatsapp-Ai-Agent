@@ -3,6 +3,7 @@ from bot.memory import (
     save_message, get_history, get_current_topic, set_current_topic,
     update_streak, get_exam_date, _days_until,
 )
+from config import ADMIN_CHAT_ID
 from bot.quiz import (
     has_active_quiz, check_answer, stop_quiz,
     has_active_mock_test, check_mock_answer,
@@ -36,6 +37,38 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
     save_message(chat_id, "user", user_text)
     update_streak(chat_id)
     lower = user_text.strip().lower()
+
+    # --- Admin nuclear reset (Harshdeep only) ---
+    if lower == "yudhister nuke" and ADMIN_CHAT_ID and chat_id == ADMIN_CHAT_ID:
+        from bot.supabase_client import get_sb
+        sb = get_sb()
+        sb.table("conversations").delete().eq("chat_id", chat_id).execute()
+        sb.table("quiz_sessions").delete().eq("chat_id", chat_id).execute()
+        sb.table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
+        sb.table("scheduled_jobs").update({"active": False}).eq("chat_id", chat_id).execute()
+        sb.table("user_answer_history").delete().eq("chat_id", chat_id).execute()
+        sb.table("user_progress").delete().eq("chat_id", chat_id).execute()
+        sb.table("user_profiles").update({
+            "current_topic": None,
+            "study_session": None,
+            "exam_date": None,
+            "study_streak": 0,
+            "last_active_date": None,
+        }).eq("chat_id", chat_id).execute()
+        set_current_topic(chat_id, None)
+        msg = (
+            "💣 *Nuclear reset complete.*\n\n"
+            "Cleared:\n"
+            "✅ All conversations\n"
+            "✅ All quiz & mock test sessions\n"
+            "✅ All scheduled jobs\n"
+            "✅ All answer history\n"
+            "✅ All progress stats\n"
+            "✅ Profile (streak, exam date, topic)\n\n"
+            "Fresh start. Say *hi* to begin."
+        )
+        save_message(chat_id, "assistant", msg)
+        return msg
 
     # --- Reset ---
     if "clear all my session" in lower:

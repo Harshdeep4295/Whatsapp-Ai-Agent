@@ -26,7 +26,7 @@ Hard rules:
 - Use *bold* only for key terms, no markdown headers
 - NEVER make up or guess URLs — say "search for [X] on Google"
 - When a student says "yes", "sure", "ok", "go on", "continue" — treat it as "continue what we were doing"
-- If asked for a mock test or paper, generate questions directly — never promise a link"""
+- Quiz questions, mock tests, and study sessions are sent via tools — NEVER generate questions in your text replies"""
 
 def chat(messages: list, context: str = "", depth: str = "short", current_topic: str = None) -> str:
     system = SYSTEM_PROMPT
