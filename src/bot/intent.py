@@ -3,7 +3,7 @@ from bot.llm import get_client
 
 INTENT_PROMPT = """Classify this message from an HCS (Haryana Civil Services) exam prep student. Return ONLY valid JSON, nothing else.
 
-Intents: SYLLABUS, PAPER, QUIZ, EXPLAIN, NEWS, STUDY_PLAN, SCHEDULE, CANCEL_SCHEDULE, MOCK_TEST, STUDY_SESSION, GENERAL
+Intents: SYLLABUS, PAPER, QUIZ, EXPLAIN, NEWS, STUDY_PLAN, SCHEDULE, CANCEL_SCHEDULE, MOCK_TEST, STUDY_SESSION, PROGRESS, GENERAL
 
 Example: {"intent": "QUIZ", "subject": "CSAT", "year": null, "schedule_text": null, "count": null}
 
@@ -18,6 +18,7 @@ Rules:
 - SCHEDULE = ONLY when user explicitly wants AUTOMATED recurring messages (e.g. "send me every hour", "remind me daily at 8am"). NEVER classify one-word replies like "yes", "sure", "ok" as SCHEDULE.
 - CANCEL_SCHEDULE = user wants to stop scheduled updates ("stop updates", "cancel reminders")
 - NEWS = user explicitly asks for current affairs or news updates
+- PROGRESS = user wants to see their stats, progress, score history, streak, or what to focus on — "my progress", "how am I doing", "show my stats", "my score", "my weak topics", "what should I study"
 - GENERAL = greetings, "yes", "sure", "ok", "continue", "go on", "thanks", vague replies, or anything not fitting above
 
 Critical:

@@ -2,7 +2,7 @@ import re
 from bot.intent import detect_intent
 from bot.rag import retrieve
 from bot.llm import chat
-from bot.memory import save_message, get_history, get_current_topic, set_current_topic
+from bot.memory import save_message, get_history, get_current_topic, set_current_topic, update_streak
 from bot.fetcher import search_and_fetch
 from bot.quiz import (
     start_quiz, check_answer, stop_quiz, has_active_quiz,
@@ -55,6 +55,7 @@ async def _quiz_reply(chat_id: str, text: str, q_data: dict | None) -> None:
 
 async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bool = False) -> str | None:
     save_message(chat_id, "user", user_text)
+    update_streak(chat_id)
     lower = user_text.strip().lower()
 
     # --- Reset ---
@@ -76,7 +77,27 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         if not history:
             save_message(chat_id, "assistant", WELCOME_MSG)
             return WELCOME_MSG
-        reply = "Hey! 👋 Good to see you again. Ready to continue HCS prep?\n\nWhat do you need — quiz, mock test, syllabus, current affairs, or study plan?"
+        try:
+            from supabase import create_client
+            from config import SUPABASE_URL, SUPABASE_KEY
+            from bot.memory import get_profile
+            _sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+            profile = get_profile(chat_id)
+            streak = profile.get("study_streak") or 0
+            streak_line = f"Day *{streak}* streak 🔥  " if streak >= 2 else ""
+
+            prog_res = _sb.table("user_progress").select("topic,correct,total")\
+                .eq("chat_id", chat_id).order("total", desc=True).execute()
+            weak_line = ""
+            if prog_res.data:
+                weak = [(r["topic"], r["correct"]/r["total"]) for r in prog_res.data if r["total"] >= 2]
+                if weak:
+                    worst = min(weak, key=lambda x: x[1])
+                    pct = int(worst[1] * 100)
+                    weak_line = f"\n\n📊 *Focus today:* {worst[0]} ({pct}% accuracy) — say *study {worst[0]}* to drill it."
+            reply = f"Hey! 👋 {streak_line}Good to see you back.\n\nWhat do you need — quiz, mock test, syllabus, current affairs, or study plan?{weak_line}"
+        except Exception:
+            reply = "Hey! 👋 Good to see you again. Ready to continue HCS prep?\n\nWhat do you need — quiz, mock test, syllabus, current affairs, or study plan?"
         save_message(chat_id, "assistant", reply)
         return reply
 
@@ -132,6 +153,8 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             job_type = "current_affairs"
         elif any(k in full_lower for k in ["report", "performance", "weekly"]):
             job_type = "weekly_report"
+        elif any(k in full_lower for k in ["nightly", "revision", "recap", "daily revision"]):
+            job_type = "nightly_revision"
         else:
             job_type = JOB_TYPES.get(subject.lower(), "current_affairs")
         reply = schedule_job(chat_id, job_type, interval, EXAM, subject)
@@ -191,6 +214,48 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         history = get_history(chat_id)
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
         reply = chat(messages, depth="full", current_topic=current_topic)
+
+    elif intent == "PROGRESS":
+        try:
+            from supabase import create_client
+            from config import SUPABASE_URL, SUPABASE_KEY
+            from bot.memory import get_profile
+            _sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+            profile = get_profile(chat_id)
+            streak = profile.get("study_streak") or 0
+
+            res = _sb.table("user_progress").select("topic,correct,total")\
+                .eq("chat_id", chat_id).execute()
+            rows = res.data or []
+
+            if not rows:
+                reply = "You haven't done any quizzes yet!\n\nSay *quiz me* to start — I'll track your progress from here."
+            else:
+                total_q = sum(r["total"] for r in rows)
+                total_c = sum(r["correct"] for r in rows)
+                overall = int(total_c / total_q * 100) if total_q else 0
+
+                strong = [r for r in rows if r["total"] >= 2 and r["correct"]/r["total"] > 0.8]
+                weak = [r for r in rows if r["total"] >= 2 and r["correct"]/r["total"] < 0.6]
+                mid = [r for r in rows if r["total"] >= 2 and 0.6 <= r["correct"]/r["total"] <= 0.8]
+
+                def fmt_topic(r):
+                    return f"{r['topic']} ({int(r['correct']/r['total']*100)}%)"
+
+                streak_line = f"🔥 *Streak:* {streak} day{'s' if streak != 1 else ''}\n" if streak else ""
+                strong_line = f"\n✅ *Strong:* {', '.join(fmt_topic(r) for r in sorted(strong, key=lambda x: -x['correct']/x['total'])[:3])}" if strong else ""
+                mid_line = f"\n📖 *Improving:* {', '.join(fmt_topic(r) for r in mid[:3])}" if mid else ""
+                weak_line = f"\n⚠️ *Needs work:* {', '.join(fmt_topic(r) for r in sorted(weak, key=lambda x: x['correct']/x['total'])[:3])}" if weak else ""
+
+                reply = (
+                    f"📊 *Your HCS Progress*\n\n"
+                    f"{streak_line}"
+                    f"*Overall accuracy:* {total_c}/{total_q} ({overall}%)"
+                    f"{strong_line}{mid_line}{weak_line}\n\n"
+                    f"_Say *quiz me* to practice weak topics, or *nightly revision* to schedule a daily recap._"
+                )
+        except Exception as e:
+            reply = "Couldn't load your progress right now. Try again in a moment."
 
     else:  # GENERAL — continue conversation naturally
         is_expanding = any(p in lower for p in EXPAND_PHRASES)

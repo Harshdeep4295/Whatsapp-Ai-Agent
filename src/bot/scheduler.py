@@ -23,6 +23,10 @@ JOB_TYPES = {
     "weekly_report": "weekly_report",
     "report": "weekly_report",
     "performance": "weekly_report",
+    "nightly_revision": "nightly_revision",
+    "night": "nightly_revision",
+    "revision": "nightly_revision",
+    "daily revision": "nightly_revision",
 }
 
 INTERVAL_ALIASES = {
@@ -211,7 +215,100 @@ def _generate_content(job: dict) -> tuple[str, str]:
             print(f"[scheduler] weekly_report failed: {e}")
             return None, ""
 
+    if jtype == "nightly_revision":
+        return _generate_nightly_revision(job)
+
     return None, ""
+
+def _generate_nightly_revision(job: dict) -> tuple[str, str]:
+    import hashlib
+    from datetime import datetime, timezone, timedelta
+    from bot.llm import get_client
+
+    chat_id = job["chat_id"]
+    last_hash = job.get("last_content_hash")
+
+    # 1. Pull today's conversation (last 24h)
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    try:
+        conv_res = sb.table("conversations").select("role,content")\
+            .eq("chat_id", chat_id)\
+            .gte("created_at", since)\
+            .order("created_at").execute()
+        messages = conv_res.data or []
+    except Exception:
+        messages = []
+
+    # 2. Get weak topics from user_progress
+    try:
+        prog_res = sb.table("user_progress").select("topic,correct,total")\
+            .eq("chat_id", chat_id).execute()
+        rows = prog_res.data or []
+        weak = sorted(
+            [r for r in rows if r["total"] >= 2],
+            key=lambda r: r["correct"] / r["total"]
+        )[:3]
+    except Exception:
+        weak = []
+
+    # 3. Get streak
+    try:
+        profile_res = sb.table("user_profiles").select("study_streak").eq("chat_id", chat_id).execute()
+        streak = (profile_res.data[0].get("study_streak") or 0) if profile_res.data else 0
+    except Exception:
+        streak = 0
+
+    # 4. LLM: extract today's topics + key facts from conversations
+    today_summary = ""
+    if messages:
+        convo_text = "\n".join(
+            f"{m['role'].upper()}: {m['content'][:200]}" for m in messages[-30:]
+        )
+        client = get_client()
+        try:
+            r = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "user", "content":
+                    "From this HCS study chat, extract:\n"
+                    "1. Topics the student studied today (list up to 4, short names)\n"
+                    "2. Up to 3 key facts worth remembering\n\n"
+                    "Format:\nTopics: [topic1, topic2]\nKey Facts:\n• fact1\n• fact2\n\n"
+                    f"Chat:\n{convo_text}"
+                }],
+                max_tokens=200,
+            )
+            today_summary = r.choices[0].message.content.strip()
+        except Exception:
+            today_summary = ""
+
+    # 5. Build the message
+    from datetime import date
+    date_str = date.today().strftime("%d %b %Y")
+    streak_line = f"🔥 Day *{streak}* streak!\n\n" if streak >= 2 else ""
+
+    parts = [f"*📚 Nightly Revision — {date_str}*\n\n{streak_line}"]
+
+    if today_summary:
+        parts.append(f"*What you covered today:*\n{today_summary}")
+    else:
+        parts.append("No activity recorded today — make sure to study something tomorrow! 💪")
+
+    if weak:
+        weak_lines = "\n".join(
+            f"• {r['topic']}: {int(r['correct']/r['total']*100)}% ({r['total']} questions)"
+            for r in weak
+        )
+        parts.append(f"*⚠️ Weak areas to revise:*\n{weak_lines}")
+
+    parts.append("_Reply *quiz me* to drill your weak topics, or *my progress* for full stats._")
+
+    content = "\n\n".join(parts)
+    content_hash = hashlib.md5(content.encode()).hexdigest()
+
+    if content_hash == last_hash:
+        return None, last_hash
+
+    return content, content_hash
 
 def start_scheduler():
     global _scheduler
