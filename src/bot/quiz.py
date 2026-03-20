@@ -1,6 +1,15 @@
 import json
 import random
+import re
 from datetime import datetime, timezone
+
+
+def _extract_letter(user_answer: str) -> str:
+    """Extract A/B/C/D from answers like 'C', 'C.', 'Q1 C', 'B. Rice', etc."""
+    m = re.search(r'\b([A-D])\b', user_answer.upper())
+    if m:
+        return m.group(1)
+    return user_answer.strip().upper()[0] if user_answer.strip() else "X"
 from bot.supabase_client import get_sb
 from bot.llm import get_client
 
@@ -224,7 +233,7 @@ def check_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]:
         return "No active quiz. Send *quiz me* to start one!", None
 
     s = res.data[0]
-    letter = user_answer.strip().upper()[0]
+    letter = _extract_letter(user_answer)
     correct = s["correct_answer"]
     is_right = letter == correct
     new_score = s["score"] + (1 if is_right else 0)
@@ -466,7 +475,7 @@ def check_study_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None
         return "No active study session. Say *let's study [topic]* to start one!", None
 
     q = sess["pending_q"]
-    letter = user_answer.strip().upper()[0]
+    letter = _extract_letter(user_answer)
     correct = q["correct"]
     is_right = letter == correct
 

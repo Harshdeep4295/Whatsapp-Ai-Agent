@@ -1,4 +1,4 @@
-from bot.whatsapp import send_message, send_interactive_quiz
+from bot.whatsapp import send_message
 from bot.memory import save_message
 
 
@@ -30,7 +30,10 @@ async def _start_quiz(chat_id: str, subject: str = None) -> str:
     save_message(chat_id, "assistant", text)
     await send_message(chat_id, text)
     if q_data:
-        await send_interactive_quiz(chat_id, q_data["question"], q_data["options"], q_data.get("topic", ""))
+        topic = q_data.get("topic", "")
+        topic_line = f"_Topic: {topic}_\n\n" if topic else ""
+        opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
+        await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
     return "✅ Quiz with 5 questions has been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence like 'Good luck! 🎯' — do NOT generate any questions or answer choices in your reply."
 
 
@@ -40,7 +43,10 @@ async def _start_mock_test(chat_id: str, question_count: int = 10, topic: str = 
     save_message(chat_id, "assistant", text)
     await send_message(chat_id, text)
     if q_data:
-        await send_interactive_quiz(chat_id, q_data["question"], q_data["options"], q_data.get("topic", ""))
+        topic_name = q_data.get("topic", "")
+        topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
+        opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
+        await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
     label = f"on {topic}" if topic else f"{question_count} questions"
     return f"✅ Mock test ({label}) has been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence like 'Good luck! 🎯' — do NOT generate any questions or answer choices in your reply."
 
@@ -53,7 +59,10 @@ async def _start_study_session(chat_id: str, topic: str) -> str:
     save_message(chat_id, "assistant", text)
     await send_message(chat_id, text)
     if q_data:
-        await send_interactive_quiz(chat_id, q_data["question"], q_data["options"], q_data.get("topic", ""))
+        topic_name = q_data.get("topic", "")
+        topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
+        opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
+        await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
     return f"✅ Study session on '{topic}' with overview and first question has been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence — do NOT write a study plan, do NOT generate questions, do NOT repeat any content."
 
 

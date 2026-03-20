@@ -1,3 +1,4 @@
+import re as _re
 from bot.groq_tools import run_tool_loop
 from bot.memory import (
     save_message, get_history, get_current_topic, set_current_topic,
@@ -9,7 +10,7 @@ from bot.quiz import (
     has_active_mock_test, check_mock_answer,
     has_active_study_session, check_study_answer,
 )
-from bot.whatsapp import send_message, send_interactive_quiz
+from bot.whatsapp import send_message
 
 WELCOME_MSG = (
     "Hey! I'm *Yudhister* 👋 Your HCS exam prep buddy.\n\n"
@@ -30,7 +31,11 @@ async def _quiz_reply(chat_id: str, text: str, q_data: dict | None) -> None:
     save_message(chat_id, "assistant", text)
     await send_message(chat_id, text)
     if q_data:
-        await send_interactive_quiz(chat_id, q_data["question"], q_data["options"], q_data.get("topic", ""))
+        topic = q_data.get("topic", "")
+        topic_line = f"_Topic: {topic}_\n\n" if topic else ""
+        opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
+        q_text = f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
+        await send_message(chat_id, q_text)
 
 
 async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bool = False) -> str | None:
@@ -122,6 +127,15 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         save_message(chat_id, "assistant", reply)
         return reply
 
+    def _is_answer(text: str) -> bool:
+        t = text.strip().lower()
+        return (
+            len(t) <= 2
+            or t in ["a", "b", "c", "d"]
+            or bool(_re.match(r'^[a-d][\.\s]', t))
+            or bool(_re.search(r'\bq\d+[\.\s]', t))
+        )
+
     # --- Active mock test intercept ---
     if has_active_mock_test(chat_id):
         if lower in STOP_PHRASES:
@@ -129,8 +143,17 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             get_sb().table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
             await _quiz_reply(chat_id, "Mock test ended.", None)
             return None
-        if len(lower) <= 2 or lower in ["a", "b", "c", "d"]:
-            await _quiz_reply(chat_id, *check_mock_answer(chat_id, user_text))
+        if _is_answer(user_text):
+            # Batch answers: "Q1 C...\nQ2 B..." — extract each and process sequentially
+            batch = _re.findall(r'q\d+[.\s]+([a-d])', lower)
+            if batch:
+                for ans in batch:
+                    text, q_data = check_mock_answer(chat_id, ans)
+                    await _quiz_reply(chat_id, text, q_data)
+                    if q_data is None:
+                        break
+            else:
+                await _quiz_reply(chat_id, *check_mock_answer(chat_id, user_text))
             return None
 
     # --- Active study session intercept ---
@@ -141,7 +164,7 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             set_current_topic(chat_id, None)
             await _quiz_reply(chat_id, "Study session ended.", None)
             return None
-        if len(lower) <= 2 or lower in ["a", "b", "c", "d"]:
+        if _is_answer(user_text):
             await _quiz_reply(chat_id, *check_study_answer(chat_id, user_text))
             return None
 
@@ -150,7 +173,7 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         if lower in STOP_PHRASES:
             await _quiz_reply(chat_id, *stop_quiz(chat_id))
             return None
-        if len(lower) <= 2 or lower in ["a", "b", "c", "d"]:
+        if _is_answer(user_text):
             await _quiz_reply(chat_id, *check_answer(chat_id, user_text))
             return None
 

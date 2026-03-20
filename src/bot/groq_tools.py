@@ -1,4 +1,5 @@
 import json
+from groq import BadRequestError
 from bot.llm import get_client, SYSTEM_PROMPT
 
 MAX_ROUNDS = 5
@@ -157,21 +158,32 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
     rag_context = retrieve(user_text) if len(user_text) > 10 else ""
 
     system = _build_system(current_topic, rag_context)
+    MAX_HISTORY = 8
+    trimmed = history[-MAX_HISTORY:] if len(history) > MAX_HISTORY else history
     messages = [
-        *[{"role": m["role"], "content": m["content"]} for m in history],
+        *[{"role": m["role"], "content": m["content"]} for m in trimmed],
         {"role": "user", "content": user_text}
     ]
     client = get_client()
 
     for _ in range(MAX_ROUNDS):
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": system}, *messages],
-            tools=TOOL_SCHEMAS,
-            tool_choice="auto",
-            max_tokens=1024,
-            temperature=0.7,
-        )
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": system}, *messages],
+                tools=TOOL_SCHEMAS,
+                tool_choice="auto",
+                max_tokens=1024,
+                temperature=0.7,
+            )
+        except BadRequestError:
+            fallback = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": system}, *messages[-3:]],
+                max_tokens=512,
+                temperature=0.7,
+            )
+            return fallback.choices[0].message.content or "Something went wrong, please try again."
         msg = response.choices[0].message
 
         if not msg.tool_calls:
