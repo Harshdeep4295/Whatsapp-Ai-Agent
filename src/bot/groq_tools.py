@@ -50,6 +50,20 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "start_passage_quiz",
+            "description": "Teach a topic from absolute scratch for a complete beginner — generates a simple reading passage on the topic, then asks 3 comprehension questions from that passage. Use when user says 'teach me from scratch', 'explain like I know nothing', 'I have no idea about X', 'zero to hero on X', 'start from basics', 'I am a beginner at X', or similar. Do NOT use for users who just want a quick quiz — use start_quiz for that.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "The HCS topic to teach from scratch e.g. 'Panchayati Raj', 'Haryana Geography', 'Indian Economy'"}
+                },
+                "required": ["topic"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_current_affairs",
             "description": "Fetch latest current affairs / news relevant to HCS exam preparation.",
             "parameters": {"type": "object", "properties": {}}

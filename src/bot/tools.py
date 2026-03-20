@@ -7,6 +7,7 @@ async def execute_tool(name: str, inputs: dict, chat_id: str) -> str:
         "start_quiz": _start_quiz,
         "start_mock_test": _start_mock_test,
         "start_study_session": _start_study_session,
+        "start_passage_quiz": _start_passage_quiz,
         "get_current_affairs": _get_current_affairs,
         "get_syllabus_or_paper": _get_syllabus_or_paper,
         "get_user_progress": _get_user_progress,
@@ -64,6 +65,21 @@ async def _start_study_session(chat_id: str, topic: str) -> str:
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
         await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
     return f"✅ Study session on '{topic}' with overview and first question has been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence — do NOT write a study plan, do NOT generate questions, do NOT repeat any content."
+
+
+async def _start_passage_quiz(chat_id: str, topic: str) -> str:
+    from bot.quiz import start_passage_quiz
+    from bot.memory import set_current_topic
+    set_current_topic(chat_id, topic)
+    text, q_data = start_passage_quiz(chat_id, topic)
+    save_message(chat_id, "assistant", text)
+    await send_message(chat_id, text)
+    if q_data:
+        topic_name = q_data.get("topic", "")
+        topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
+        opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
+        await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
+    return f"✅ Passage on '{topic}' and first comprehension question have been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence like 'Take your time reading! 📖' — do NOT write the passage or questions again."
 
 
 async def _get_current_affairs(chat_id: str) -> str:

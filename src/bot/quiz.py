@@ -75,6 +75,31 @@ Write a study session intro that covers:
 
 Keep it under 150 words. Friendly and specific."""
 
+PASSAGE_PROMPT = """You are Yudhister, a professor with 20+ years of HCS exam teaching experience. A complete beginner wants to learn about: "{topic}"
+
+Write a clear, engaging educational passage (200-250 words) that:
+- Assumes ZERO prior knowledge — explain every term used
+- Covers 3-4 key facts/concepts a beginner must know
+- Uses simple language (10th standard level)
+- Has short paragraphs (2-3 sentences each)
+- Ends with: "📌 Key takeaway: [one sentence summary]"
+
+No bullet points. No headings. Just flowing, readable text."""
+
+PASSAGE_MCQ_PROMPT = """Based ONLY on the passage below, generate exactly 3 MCQs that test reading comprehension.
+
+Passage:
+{passage}
+
+Rules:
+- Every question must be answerable ONLY from information in the passage
+- Do NOT test general knowledge — only what the passage says
+- One correct answer, three plausible wrong options
+- Keep questions simple and direct
+
+Return ONLY valid JSON array, nothing else:
+[{{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"The passage states that..."}}]"""
+
 
 def _get_adaptive_topic(chat_id: str, subject: str) -> str:
     """Pick topic adaptively based on user_progress. Weak topics get 3x weight, untried 2x, strong 1x."""
@@ -389,7 +414,7 @@ def check_mock_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]
     n = len(questions)
 
     q = questions[idx]
-    letter = user_answer.strip().upper()[0]
+    letter = _extract_letter(user_answer)
     correct = q["correct"]
     is_right = letter == correct
 
@@ -529,3 +554,114 @@ def has_active_study_session(chat_id: str) -> bool:
     from bot.memory import get_study_session
     sess = get_study_session(chat_id)
     return bool(sess and "pending_q" in sess)
+
+
+# ── Passage Quiz ─────────────────────────────────────────────────────────────
+
+def start_passage_quiz(chat_id: str, topic: str) -> tuple[str, dict]:
+    """Generate a beginner passage on the topic, then 3 MCQs from it. Returns (passage_text, first_q_dict)."""
+    from bot.memory import set_study_session, set_current_topic
+
+    client = get_client()
+
+    # Step 1: generate passage
+    r = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": PASSAGE_PROMPT.format(topic=topic)}],
+        max_tokens=400,
+        temperature=0.7,
+    )
+    passage = r.choices[0].message.content.strip()
+
+    # Step 2: generate 3 MCQs from the passage
+    r2 = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": PASSAGE_MCQ_PROMPT.format(passage=passage)}],
+        max_tokens=600,
+        temperature=0.6,
+    )
+    raw = r2.choices[0].message.content.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    questions = json.loads(raw.strip())
+
+    # Step 3: store session
+    set_current_topic(chat_id, topic)
+    set_study_session(chat_id, {
+        "mode": "passage",
+        "topic": topic,
+        "passage_text": passage,
+        "questions": questions,
+        "q_idx": 0,
+        "correct": 0,
+        "max_q": len(questions),
+    })
+
+    first_q = questions[0]
+    return (
+        f"📖 *Let's learn {topic} from scratch!*\n\n{passage}\n\n*Now let's see what you understood 👇*\n\n*Question 1/{len(questions)}:*",
+        {"question": first_q["question"], "options": first_q["options"], "topic": topic},
+    )
+
+
+def check_passage_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]:
+    """Check answer for passage quiz. Questions come from pre-generated list, not re-generated."""
+    from bot.memory import get_study_session, set_study_session, set_current_topic
+
+    sess = get_study_session(chat_id)
+    if not sess or sess.get("mode") != "passage":
+        return "No active passage quiz. Say *teach me [topic] from scratch* to start!", None
+
+    questions = sess["questions"]
+    q_idx = sess["q_idx"]
+    q = questions[q_idx]
+
+    letter = _extract_letter(user_answer)
+    correct = q["correct"]
+    is_right = letter == correct
+
+    _update_progress(
+        chat_id, sess["topic"], is_right,
+        question_text=q["question"], options=q["options"],
+        correct_answer=correct, user_answer=letter,
+        explanation=q.get("explanation", ""), source="passage_quiz",
+    )
+
+    if is_right:
+        feedback = f"*Correct!* 🎉\n_{q.get('explanation', '')}_"
+    else:
+        feedback = f"*Not quite.* Answer: *{correct}* — {q['options'][correct]}\n_{q.get('explanation', '')}_"
+
+    sess["q_idx"] += 1
+    if is_right:
+        sess["correct"] += 1
+    new_idx = sess["q_idx"]
+    max_q = sess["max_q"]
+    topic = sess["topic"]
+
+    if new_idx >= max_q:
+        correct_count = sess["correct"]
+        pct = int(correct_count / max_q * 100)
+        set_study_session(chat_id, None)
+        set_current_topic(chat_id, None)
+        msg = "You're getting it! 🔥" if pct >= 80 else "Good start! 💪" if pct >= 50 else "Re-read the passage and try again! 📚"
+        return (
+            f"{feedback}\n\n*Passage Quiz Done!*\nScore: *{correct_count}/{max_q}* ({pct}%) {msg}\n\n"
+            f"_Say *teach me {topic} from scratch* to do another round, or *quiz me on {topic}* for harder questions._",
+            None,
+        )
+    else:
+        set_study_session(chat_id, sess)
+        next_q = questions[new_idx]
+        return (
+            feedback + f"\n\n*Question {new_idx + 1}/{max_q}:*",
+            {"question": next_q["question"], "options": next_q["options"], "topic": topic},
+        )
+
+
+def has_active_passage_quiz(chat_id: str) -> bool:
+    from bot.memory import get_study_session
+    sess = get_study_session(chat_id)
+    return bool(sess and sess.get("mode") == "passage")

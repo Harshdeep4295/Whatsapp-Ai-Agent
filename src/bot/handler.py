@@ -9,6 +9,7 @@ from bot.quiz import (
     has_active_quiz, check_answer, stop_quiz,
     has_active_mock_test, check_mock_answer,
     has_active_study_session, check_study_answer,
+    has_active_passage_quiz, check_passage_answer,
 )
 from bot.whatsapp import send_message
 
@@ -154,6 +155,18 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
                         break
             else:
                 await _quiz_reply(chat_id, *check_mock_answer(chat_id, user_text))
+            return None
+
+    # --- Active passage quiz intercept ---
+    if has_active_passage_quiz(chat_id):
+        if lower in STOP_PHRASES:
+            from bot.memory import set_study_session
+            set_study_session(chat_id, None)
+            set_current_topic(chat_id, None)
+            await _quiz_reply(chat_id, "Passage quiz ended.", None)
+            return None
+        if _is_answer(user_text):
+            await _quiz_reply(chat_id, *check_passage_answer(chat_id, user_text))
             return None
 
     # --- Active study session intercept ---
