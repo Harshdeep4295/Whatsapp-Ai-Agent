@@ -1,26 +1,7 @@
 import json
 import re
-import random
 from groq import BadRequestError
 from bot.llm import get_client, SYSTEM_PROMPT
-
-_QUIZ_TOOLS = {"start_quiz", "start_mock_test", "start_study_session", "start_passage_quiz"}
-_ENCOURAGEMENTS = [
-    "Good luck! 🎯",
-    "You've got this! 💪",
-    "Let's go! 🔥",
-    "Give it your best! ⭐",
-    "All the best! 🙌",
-]
-# These tools return already-formatted output — no LLM round-trip needed
-_DIRECT_RETURN_TOOLS = {
-    "get_current_affairs",
-    "get_user_progress",
-    "get_wrong_answers",
-    "cancel_scheduled_updates",
-    "set_exam_date",
-    "schedule_updates",
-}
 
 
 def _parse_text_tool_calls(content: str) -> list:
@@ -76,7 +57,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "start_study_session",
-            "description": "Start a guided study session (overview + 3 questions) on a topic. Call this when a study topic is clear — either stated directly ('study Polity') OR confirmed through conversation ('help me revise' → back-and-forth → topic is known). Do NOT wait for the user to restate the topic — if you've determined it, call this tool now.",
+            "description": "Start a guided study session (overview + 3 questions) on a specific topic. Call when a study topic has been established — either named directly ('study Polity', 'teach me Haryana History') OR confirmed through conversation (user said 'help me revise' → you asked → they confirmed a topic). Once the topic is clear, call this immediately — do NOT keep chatting. Still ask for topic if genuinely unknown.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -90,7 +71,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "start_passage_quiz",
-            "description": "Teach a topic from scratch with a reading passage + 3 comprehension questions. Call when user says they know nothing / want basics / 'explain from scratch' / 'I\\'m a beginner' — even if topic came up during conversation, not the opening message.",
+            "description": "Teach a topic from absolute scratch for a complete beginner — generates a simple reading passage on the topic, then asks 3 comprehension questions from that passage. Use when user says 'teach me from scratch', 'explain like I know nothing', 'I have no idea about X', 'zero to hero on X', 'start from basics', 'I am a beginner at X', or similar. Do NOT use for users who just want a quick quiz — use start_quiz for that.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -247,19 +228,6 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
             # Execute text-format tool calls as if they were structured
             for i, (name, args) in enumerate(text_calls):
                 result = await execute_tool(name, args, chat_id)
-                result_str = str(result)
-                if name in _QUIZ_TOOLS:
-                    if result_str.startswith("Tool error:"):
-                        return result_str
-                    from bot.whatsapp import send_message
-                    from bot.memory import save_message as _save_message
-                    _save_message(chat_id, "assistant", result_str)
-                    await send_message(chat_id, result_str)
-                    return random.choice(_ENCOURAGEMENTS)
-                if name in _DIRECT_RETURN_TOOLS:
-                    return result_str
-                # For LLM-formatted tools (e.g. get_syllabus_or_paper): must add a
-                # matching assistant message or Groq rejects the orphaned tool message
                 call_id = f"text_call_{i}"
                 messages.append({
                     "role": "assistant",
@@ -267,8 +235,8 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
                     "tool_calls": [{"id": call_id, "type": "function",
                                     "function": {"name": name, "arguments": json.dumps(args)}}],
                 })
-                messages.append({"role": "tool", "tool_call_id": call_id, "content": result_str})
-            continue  # let LLM see tool result (only reached for get_syllabus_or_paper)
+                messages.append({"role": "tool", "tool_call_id": call_id, "content": str(result)})
+            continue  # let LLM respond naturally
 
         # Serialize tool_calls for message history
         tool_calls_serialized = [
@@ -285,34 +253,13 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
             "tool_calls": tool_calls_serialized
         })
 
-        tool_results = {}
         for tc in msg.tool_calls:
             args = json.loads(tc.function.arguments)
             result = await execute_tool(tc.function.name, args, chat_id)
-            tool_results[tc.function.name] = str(result)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
                 "content": str(result)
             })
-
-        tool_names = {tc.function.name for tc in msg.tool_calls}
-
-        # Quiz tools: send quiz content directly to WhatsApp, return encouragement
-        if tool_names & _QUIZ_TOOLS:
-            quiz_results = [tool_results[n] for n in tool_names & _QUIZ_TOOLS]
-            if any(r.startswith("Tool error:") for r in quiz_results):
-                return quiz_results[0]
-            from bot.whatsapp import send_message
-            from bot.memory import save_message as _save_message
-            for quiz_content in quiz_results:
-                _save_message(chat_id, "assistant", quiz_content)
-                await send_message(chat_id, quiz_content)
-            return random.choice(_ENCOURAGEMENTS)
-
-        # Direct-return tools: already-formatted output, skip LLM round-trip
-        if tool_names & _DIRECT_RETURN_TOOLS:
-            for name in tool_names & _DIRECT_RETURN_TOOLS:
-                return tool_results[name]
 
     return "I got confused — could you rephrase that?"

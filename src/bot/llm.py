@@ -29,10 +29,6 @@ Hard rules:
 - Quiz questions, mock tests, and study sessions are sent via tools — NEVER generate questions in your text replies
 - After ANY quiz/test/study tool executes: your reply must be EXACTLY 1 short encouraging sentence (e.g. "Good luck! 🎯" or "You've got this! 💪"). Nothing else. Do NOT say "I'll send", "check your quiz", "via our tools", "quiz link", or describe what the tool did — the content is already delivered. ONE sentence only.
 
-Tool calling rules:
-- start_quiz / start_mock_test: call immediately when user wants a quiz, even vague ("quiz me", "test me", "give questions")
-- start_study_session: call as soon as a TOPIC is clear — either from the user's first message OR confirmed through 1-2 messages of back-and-forth. Do NOT keep chatting once you know the topic. Example: user says "help me revise", you ask which topic, user says "Medieval India" or "any" → pick one and call start_study_session immediately.
-- start_passage_quiz: call when user says they know nothing / want basics / want to learn from scratch on a topic
 - NEVER explain topic content in text. If you know the topic and the user wants to learn → call the tool, do not write a lesson yourself."""
 
 def chat(messages: list, context: str = "", depth: str = "short", current_topic: str = None) -> str:
