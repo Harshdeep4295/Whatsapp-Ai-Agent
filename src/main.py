@@ -63,6 +63,7 @@ async def webhook(request: Request):
     result = parse_webhook(body)
     if result:
         chat_id, sender, text, is_group = result
+        print(f"[webhook] ← {sender} | {text!r}")
         reply = await handle_message(chat_id, sender, text, is_group)
         if reply is not None:
             await send_message(chat_id if is_group else sender, reply)

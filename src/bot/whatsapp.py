@@ -48,9 +48,13 @@ async def _send_single(client: httpx.AsyncClient, to: str, text: str):
         "type": "text",
         "text": {"body": text},
     }
+    preview = text[:80].replace("\n", " ")
+    print(f"[whatsapp] → {to} | {len(text)}ch | {preview!r}")
     r = await client.post(GRAPH_URL, json=payload, headers=HEADERS)
     if r.status_code != 200:
-        print(f"[whatsapp] send failed {r.status_code}: {r.text}")
+        print(f"[whatsapp] ✗ send failed {r.status_code}: {r.text}")
+        raise RuntimeError(f"WhatsApp API error {r.status_code}: {r.text}")
+    print(f"[whatsapp] ✓ delivered")
 
 
 async def send_message(to: str, text: str):
@@ -78,10 +82,13 @@ async def send_interactive_quiz(to: str, question: str, options: dict, topic: st
             },
         },
     }
+    print(f"[whatsapp] → {to} | interactive quiz | {question[:60]!r}")
     async with httpx.AsyncClient() as client:
         r = await client.post(GRAPH_URL, json=payload, headers=HEADERS)
         if r.status_code != 200:
-            print(f"[whatsapp] interactive quiz send failed {r.status_code}: {r.text}")
+            print(f"[whatsapp] ✗ interactive quiz send failed {r.status_code}: {r.text}")
+            raise RuntimeError(f"WhatsApp API error {r.status_code}: {r.text}")
+        print(f"[whatsapp] ✓ delivered")
 
 
 def parse_webhook(body: dict) -> tuple | None:

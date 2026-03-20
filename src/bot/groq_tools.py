@@ -12,6 +12,15 @@ _ENCOURAGEMENTS = [
     "Give it your best! ⭐",
     "All the best! 🙌",
 ]
+# These tools return already-formatted output — no LLM round-trip needed
+_DIRECT_RETURN_TOOLS = {
+    "get_current_affairs",
+    "get_user_progress",
+    "get_wrong_answers",
+    "cancel_scheduled_updates",
+    "set_exam_date",
+    "schedule_updates",
+}
 
 
 def _parse_text_tool_calls(content: str) -> list:
@@ -236,12 +245,30 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
             if not text_calls:
                 return _strip_text_tool_calls(content)
             # Execute text-format tool calls as if they were structured
-            for name, args in text_calls:
+            for i, (name, args) in enumerate(text_calls):
                 result = await execute_tool(name, args, chat_id)
+                result_str = str(result)
                 if name in _QUIZ_TOOLS:
+                    if result_str.startswith("Tool error:"):
+                        return result_str
+                    from bot.whatsapp import send_message
+                    from bot.memory import save_message as _save_message
+                    _save_message(chat_id, "assistant", result_str)
+                    await send_message(chat_id, result_str)
                     return random.choice(_ENCOURAGEMENTS)
-                messages.append({"role": "tool", "tool_call_id": "text_call", "content": str(result)})
-            continue  # let LLM see the tool result
+                if name in _DIRECT_RETURN_TOOLS:
+                    return result_str
+                # For LLM-formatted tools (e.g. get_syllabus_or_paper): must add a
+                # matching assistant message or Groq rejects the orphaned tool message
+                call_id = f"text_call_{i}"
+                messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{"id": call_id, "type": "function",
+                                    "function": {"name": name, "arguments": json.dumps(args)}}],
+                })
+                messages.append({"role": "tool", "tool_call_id": call_id, "content": result_str})
+            continue  # let LLM see tool result (only reached for get_syllabus_or_paper)
 
         # Serialize tool_calls for message history
         tool_calls_serialized = [
@@ -258,18 +285,34 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
             "tool_calls": tool_calls_serialized
         })
 
+        tool_results = {}
         for tc in msg.tool_calls:
             args = json.loads(tc.function.arguments)
             result = await execute_tool(tc.function.name, args, chat_id)
+            tool_results[tc.function.name] = str(result)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
                 "content": str(result)
             })
 
-        # If any quiz/test/study tool ran, return encouragement — don't ask LLM
         tool_names = {tc.function.name for tc in msg.tool_calls}
+
+        # Quiz tools: send quiz content directly to WhatsApp, return encouragement
         if tool_names & _QUIZ_TOOLS:
+            quiz_results = [tool_results[n] for n in tool_names & _QUIZ_TOOLS]
+            if any(r.startswith("Tool error:") for r in quiz_results):
+                return quiz_results[0]
+            from bot.whatsapp import send_message
+            from bot.memory import save_message as _save_message
+            for quiz_content in quiz_results:
+                _save_message(chat_id, "assistant", quiz_content)
+                await send_message(chat_id, quiz_content)
             return random.choice(_ENCOURAGEMENTS)
+
+        # Direct-return tools: already-formatted output, skip LLM round-trip
+        if tool_names & _DIRECT_RETURN_TOOLS:
+            for name in tool_names & _DIRECT_RETURN_TOOLS:
+                return tool_results[name]
 
     return "I got confused — could you rephrase that?"
