@@ -1,14 +1,21 @@
 from openai import OpenAI
-from groq import RateLimitError as GroqRateLimitError
 from config import GROQ_API_KEY, CEREBRAS_API_KEY, TOGETHER_API_KEY
 
-# Provider configs — tried in order on rate limit
+# Provider configs — tried in order on rate limit.
+# groq-fallback uses the same API key but llama-3.1-8b-instant which has a
+# separate 500k TPD quota, so it kicks in autonomously when the 70b limit is hit.
 _PROVIDERS = [
     {
         "name": "groq",
         "base_url": "https://api.groq.com/openai/v1",
         "api_key": GROQ_API_KEY,
         "model": "llama-3.3-70b-versatile",
+    },
+    {
+        "name": "groq-fallback",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key": GROQ_API_KEY,
+        "model": "llama-3.1-8b-instant",
     },
     {
         "name": "cerebras",
@@ -25,6 +32,13 @@ _PROVIDERS = [
 ]
 
 _clients: dict = {}
+
+# Startup log — shows which providers are active
+for _p in _PROVIDERS:
+    if _p["api_key"]:
+        print(f"[llm] ✓ {_p['name']} key set ({_p['model']})")
+    else:
+        print(f"[llm] ✗ {_p['name']} key NOT set — skipped")
 
 
 def _get_client(provider: dict):
