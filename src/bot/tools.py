@@ -81,7 +81,11 @@ async def _get_syllabus_or_paper(chat_id: str, content_type: str, subject: str =
             "Data Interpretation, Basic Numeracy, Decision Making. "
             "Haryana-specific content is ~30% of GS — History, Geography, Economy, Culture, Art, Personalities."
         )
-    return context
+    return (
+        f"CONTENT FOR YOUR REPLY — paste the following {content_type} content directly into your reply "
+        f"to the user. Do NOT say 'you have already seen this' or 'as shown above' — "
+        f"the user has not received this yet. Include it in your response now:\n\n{context}"
+    )
 
 
 async def _get_user_progress(chat_id: str) -> str:
