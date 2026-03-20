@@ -35,7 +35,7 @@ async def _start_quiz(chat_id: str, subject: str = None) -> str:
         topic_line = f"_Topic: {topic}_\n\n" if topic else ""
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
         await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
-    return "✅ Quiz with 5 questions has been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence like 'Good luck! 🎯' — do NOT generate any questions or answer choices in your reply."
+    return "✅ Quiz already delivered to WhatsApp. Reply with EXACTLY 1 short encouraging sentence (e.g. 'Good luck! 🎯'). FORBIDDEN: 'quiz link', 'check your quiz', 'via our tools', 'I'll send', 'questions sent', URLs of any kind."
 
 
 async def _start_mock_test(chat_id: str, question_count: int = 10, topic: str = None) -> str:
@@ -49,7 +49,7 @@ async def _start_mock_test(chat_id: str, question_count: int = 10, topic: str = 
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
         await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
     label = f"on {topic}" if topic else f"{question_count} questions"
-    return f"✅ Mock test ({label}) has been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence like 'Good luck! 🎯' — do NOT generate any questions or answer choices in your reply."
+    return f"✅ Mock test ({label}) already delivered to WhatsApp. Reply with EXACTLY 1 short encouraging sentence (e.g. 'Good luck! 🎯'). FORBIDDEN: 'quiz link', 'check your quiz', 'via our tools', 'I'll send', URLs of any kind."
 
 
 async def _start_study_session(chat_id: str, topic: str) -> str:
@@ -64,7 +64,7 @@ async def _start_study_session(chat_id: str, topic: str) -> str:
         topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
         await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
-    return f"✅ Study session on '{topic}' with overview and first question has been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence — do NOT write a study plan, do NOT generate questions, do NOT repeat any content."
+    return f"✅ Study session on '{topic}' already delivered to WhatsApp. Reply with EXACTLY 1 short encouraging sentence. FORBIDDEN: 'quiz link', 'check your quiz', 'via our tools', 'I'll send', study plan text, questions, URLs of any kind."
 
 
 async def _start_passage_quiz(chat_id: str, topic: str) -> str:
@@ -79,7 +79,7 @@ async def _start_passage_quiz(chat_id: str, topic: str) -> str:
         topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
         await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
-    return f"✅ Passage on '{topic}' and first comprehension question have been sent directly to the user's WhatsApp. Your reply must be ONLY 1 short encouraging sentence like 'Take your time reading! 📖' — do NOT write the passage or questions again."
+    return f"✅ Passage on '{topic}' already delivered to WhatsApp. Reply with EXACTLY 1 short encouraging sentence (e.g. 'Take your time reading! 📖'). FORBIDDEN: 'quiz link', 'check your quiz', 'via our tools', 'I'll send', URLs, passage text, questions."
 
 
 async def _get_current_affairs(chat_id: str) -> str:

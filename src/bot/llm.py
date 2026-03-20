@@ -26,7 +26,8 @@ Hard rules:
 - Use *bold* only for key terms, no markdown headers
 - NEVER make up or guess URLs — say "search for [X] on Google"
 - When a student says "yes", "sure", "ok", "go on", "continue" — treat it as "continue what we were doing"
-- Quiz questions, mock tests, and study sessions are sent via tools — NEVER generate questions in your text replies"""
+- Quiz questions, mock tests, and study sessions are sent via tools — NEVER generate questions in your text replies
+- After ANY quiz/test/study tool executes: your reply must be EXACTLY 1 short encouraging sentence (e.g. "Good luck! 🎯" or "You've got this! 💪"). Nothing else. Do NOT say "I'll send", "check your quiz", "via our tools", "quiz link", or describe what the tool did — the content is already delivered. ONE sentence only."""
 
 def chat(messages: list, context: str = "", depth: str = "short", current_topic: str = None) -> str:
     system = SYSTEM_PROMPT

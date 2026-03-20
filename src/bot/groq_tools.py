@@ -1,6 +1,36 @@
 import json
+import re
+import random
 from groq import BadRequestError
 from bot.llm import get_client, SYSTEM_PROMPT
+
+_QUIZ_TOOLS = {"start_quiz", "start_mock_test", "start_study_session", "start_passage_quiz"}
+_ENCOURAGEMENTS = [
+    "Good luck! 🎯",
+    "You've got this! 💪",
+    "Let's go! 🔥",
+    "Give it your best! ⭐",
+    "All the best! 🙌",
+]
+
+
+def _parse_text_tool_calls(content: str) -> list:
+    """Parse Llama text-format tool calls: <function=name{...}</function>"""
+    results = []
+    for m in re.finditer(r'<function=(\w+)(\{[^<>]*\})?', content):
+        name = m.group(1)
+        args_str = m.group(2) or '{}'
+        try:
+            args = json.loads(args_str)
+        except json.JSONDecodeError:
+            args = {}
+        results.append((name, args))
+    return results
+
+
+def _strip_text_tool_calls(text: str) -> str:
+    """Remove any leftover <function=...> syntax from LLM output."""
+    return re.sub(r'<function=\w+[^>]*>.*?(?:</function>|$)', '', text, flags=re.DOTALL).strip()
 
 MAX_ROUNDS = 5
 
@@ -201,7 +231,17 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
         msg = response.choices[0].message
 
         if not msg.tool_calls:
-            return msg.content or ""
+            content = msg.content or ""
+            text_calls = _parse_text_tool_calls(content)
+            if not text_calls:
+                return _strip_text_tool_calls(content)
+            # Execute text-format tool calls as if they were structured
+            for name, args in text_calls:
+                result = await execute_tool(name, args, chat_id)
+                if name in _QUIZ_TOOLS:
+                    return random.choice(_ENCOURAGEMENTS)
+                messages.append({"role": "tool", "tool_call_id": "text_call", "content": str(result)})
+            continue  # let LLM see the tool result
 
         # Serialize tool_calls for message history
         tool_calls_serialized = [
@@ -226,5 +266,10 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
                 "tool_call_id": tc.id,
                 "content": str(result)
             })
+
+        # If any quiz/test/study tool ran, return encouragement — don't ask LLM
+        tool_names = {tc.function.name for tc in msg.tool_calls}
+        if tool_names & _QUIZ_TOOLS:
+            return random.choice(_ENCOURAGEMENTS)
 
     return "I got confused — could you rephrase that?"
