@@ -3,6 +3,7 @@ uvicorn
 httpx
 python-dotenv
 groq
+openai
 supabase
 chromadb==0.4.24
 numpy<2.0

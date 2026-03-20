@@ -1,13 +1,87 @@
-from groq import Groq
-from config import GROQ_API_KEY
+from openai import OpenAI
+from groq import RateLimitError as GroqRateLimitError
+from config import GROQ_API_KEY, CEREBRAS_API_KEY, TOGETHER_API_KEY
 
-_client = None
+# Provider configs — tried in order on rate limit
+_PROVIDERS = [
+    {
+        "name": "groq",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key": GROQ_API_KEY,
+        "model": "llama-3.3-70b-versatile",
+    },
+    {
+        "name": "cerebras",
+        "base_url": "https://api.cerebras.ai/v1",
+        "api_key": CEREBRAS_API_KEY,
+        "model": "llama-3.3-70b",
+    },
+    {
+        "name": "together",
+        "base_url": "https://api.together.xyz/v1",
+        "api_key": TOGETHER_API_KEY,
+        "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    },
+]
+
+_clients: dict = {}
+
+
+def _get_client(provider: dict):
+    name = provider["name"]
+    if name not in _clients:
+        _clients[name] = OpenAI(
+            base_url=provider["base_url"],
+            api_key=provider["api_key"] or "none",
+        )
+    return _clients[name]
+
+
+def _available_providers():
+    """Yield only providers that have an API key configured."""
+    for p in _PROVIDERS:
+        if p["api_key"]:
+            yield p
+
 
 def get_client():
-    global _client
-    if _client is None:
-        _client = Groq(api_key=GROQ_API_KEY)
-    return _client
+    """Return the primary (Groq) client — kept for backward compat."""
+    from groq import Groq
+    return Groq(api_key=GROQ_API_KEY)
+
+
+def create_completion(messages: list, max_tokens: int = 400, temperature: float = 0.85) -> str:
+    """Sync LLM call with provider fallback. Use this instead of get_client() in quiz/news/scheduler."""
+    response, _ = _create_with_fallback(messages, max_tokens=max_tokens, temperature=temperature)
+    return response.choices[0].message.content.strip()
+
+
+def _create_with_fallback(messages: list, max_tokens: int, temperature: float, tools=None, tool_choice=None) -> tuple:
+    """Try providers in order. Returns (response, provider_name)."""
+    last_err = None
+    for provider in _available_providers():
+        client = _get_client(provider)
+        try:
+            kwargs = dict(
+                model=provider["model"],
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = tool_choice or "auto"
+            response = client.chat.completions.create(**kwargs)
+            return response, provider["name"]
+        except Exception as e:
+            err_str = str(e)
+            if "rate_limit" in err_str.lower() or "429" in err_str or "quota" in err_str.lower():
+                print(f"[llm] {provider['name']} rate limited, trying next provider")
+                last_err = e
+                continue
+            raise  # non-rate-limit errors bubble up immediately
+    raise last_err or RuntimeError("All providers exhausted")
+
 
 SYSTEM_PROMPT = """You are Yudhister, a professor and HCS exam expert with 20+ years of experience teaching Haryana Civil Services aspirants. You have coached hundreds of successful HCS officers and know every corner of the HPSC syllabus, question patterns, and exam strategy.
 
@@ -32,6 +106,7 @@ Hard rules:
 - NEVER explain topic content in text. If you know the topic and the user wants to learn → call the tool, do not write a lesson yourself.
 - "Tell me more", "what else", "continue", "explain that", "more details" and similar vague follow-ups → reply in text only. Do NOT call any tool unless the user names a specific action or topic in the same message."""
 
+
 def chat(messages: list, context: str = "", depth: str = "short", current_topic: str = None) -> str:
     system = SYSTEM_PROMPT
     if current_topic:
@@ -42,11 +117,6 @@ def chat(messages: list, context: str = "", depth: str = "short", current_topic:
         system += "\n\nKEY: Reply in 2-4 lines max right now. End with one follow-up question or 'Want to go deeper?'"
     elif depth == "full":
         system += "\n\nKEY: Give a thorough, complete explanation. Break into clear steps if needed."
-    client = get_client()
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "system", "content": system}] + messages,
-        max_tokens=900 if depth == "full" else 500,
-        temperature=0.7,
-    )
+    full_messages = [{"role": "system", "content": system}] + messages
+    response, _ = _create_with_fallback(full_messages, max_tokens=900 if depth == "full" else 500, temperature=0.7)
     return response.choices[0].message.content

@@ -11,7 +11,7 @@ def _extract_letter(user_answer: str) -> str:
         return m.group(1)
     return user_answer.strip().upper()[0] if user_answer.strip() else "X"
 from bot.supabase_client import get_sb
-from bot.llm import get_client
+from bot.llm import create_completion
 
 sb = get_sb()
 
@@ -182,14 +182,11 @@ def _update_progress(
 
 def _generate(subject: str) -> dict:
     topic = subject
-    client = get_client()
-    r = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+    raw = create_completion(
         messages=[{"role": "user", "content": MCQ_PROMPT.format(subject=topic)}],
         max_tokens=400,
         temperature=0.85,
     )
-    raw = r.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -325,14 +322,11 @@ def start_batch_quiz(chat_id: str, n: int = 5, topic: str = None) -> tuple[str, 
         all_topics = HCS_GS_TOPICS + HCS_CSAT_TOPICS
         topics_str = ", ".join(all_topics)
         topic_constraint = f"across different topics from this list: {topics_str}"
-    client = get_client()
-    r = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+    raw = create_completion(
         messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(n=n, topic_constraint=topic_constraint)}],
         max_tokens=n * 220,
         temperature=0.85,
     )
-    raw = r.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -370,14 +364,11 @@ def start_mock_test(chat_id: str, n: int = 10, topic: str = None) -> str:
         all_topics = HCS_GS_TOPICS + HCS_CSAT_TOPICS
         topics_str = ", ".join(all_topics)
         topic_constraint = f"across different topics from this list: {topics_str}"
-    client = get_client()
-    r = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+    raw = create_completion(
         messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(n=n, topic_constraint=topic_constraint)}],
         max_tokens=n * 220,
         temperature=0.85,
     )
-    raw = r.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -465,14 +456,11 @@ def has_active_mock_test(chat_id: str) -> bool:
 
 def start_study_session(chat_id: str, topic: str) -> str:
     from bot.memory import set_study_session, set_current_topic
-    client = get_client()
-    r = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+    overview = create_completion(
         messages=[{"role": "user", "content": STUDY_OVERVIEW_PROMPT.format(topic=topic)}],
         max_tokens=300,
         temperature=0.7,
     )
-    overview = r.choices[0].message.content.strip()
 
     set_current_topic(chat_id, topic)
     set_study_session(chat_id, {"topic": topic, "q_count": 0, "correct": 0, "max_q": 3})
@@ -562,25 +550,19 @@ def start_passage_quiz(chat_id: str, topic: str) -> tuple[str, dict]:
     """Generate a beginner passage on the topic, then 3 MCQs from it. Returns (passage_text, first_q_dict)."""
     from bot.memory import set_study_session, set_current_topic
 
-    client = get_client()
-
     # Step 1: generate passage
-    r = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+    passage = create_completion(
         messages=[{"role": "user", "content": PASSAGE_PROMPT.format(topic=topic)}],
         max_tokens=400,
         temperature=0.7,
     )
-    passage = r.choices[0].message.content.strip()
 
     # Step 2: generate 3 MCQs from the passage
-    r2 = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+    raw = create_completion(
         messages=[{"role": "user", "content": PASSAGE_MCQ_PROMPT.format(passage=passage)}],
         max_tokens=600,
         temperature=0.6,
     )
-    raw = r2.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):

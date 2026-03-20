@@ -1,7 +1,6 @@
 import json
 import re
-from groq import BadRequestError
-from bot.llm import get_client, SYSTEM_PROMPT
+from bot.llm import SYSTEM_PROMPT, _create_with_fallback
 
 
 def _parse_text_tool_calls(content: str) -> list:
@@ -198,26 +197,28 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
         *[{"role": m["role"], "content": m["content"]} for m in trimmed],
         {"role": "user", "content": user_text}
     ]
-    client = get_client()
-
     for _ in range(MAX_ROUNDS):
         try:
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": system}, *messages],
-                tools=TOOL_SCHEMAS,
-                tool_choice="auto",
+            response, _ = _create_with_fallback(
+                [{"role": "system", "content": system}, *messages],
                 max_tokens=1024,
                 temperature=0.7,
+                tools=TOOL_SCHEMAS,
+                tool_choice="auto",
             )
-        except BadRequestError:
-            fallback = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": system}, *messages[-3:]],
-                max_tokens=512,
-                temperature=0.7,
-            )
-            return fallback.choices[0].message.content or "Something went wrong, please try again."
+        except Exception as e:
+            err = str(e)
+            if "400" in err or "bad_request" in err.lower():
+                try:
+                    response, _ = _create_with_fallback(
+                        [{"role": "system", "content": system}, *messages[-3:]],
+                        max_tokens=512,
+                        temperature=0.7,
+                    )
+                    return response.choices[0].message.content or "Something went wrong, please try again."
+                except Exception:
+                    pass
+            return "I'm having trouble right now — please try again in a moment! 🙏"
         msg = response.choices[0].message
 
         if not msg.tool_calls:

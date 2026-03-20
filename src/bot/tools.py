@@ -24,51 +24,63 @@ async def execute_tool(name: str, inputs: dict, chat_id: str) -> str:
 
 async def _start_quiz(chat_id: str, subject: str = None) -> str:
     from bot.quiz import start_batch_quiz
+    from bot.whatsapp import send_message
     text, q_data = start_batch_quiz(chat_id, 5)
     if q_data:
         topic = q_data.get("topic", "")
         topic_line = f"_Topic: {topic}_\n\n" if topic else ""
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
         q_text = f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
-        return text + "\n\n" + q_text
-    return text
+        full = text + "\n\n" + q_text
+    else:
+        full = text
+    await send_message(chat_id, full)
+    return "Quiz started. Content delivered to user."
 
 
 async def _start_mock_test(chat_id: str, question_count: int = 10, topic: str = None) -> str:
     from bot.quiz import start_mock_test
+    from bot.whatsapp import send_message
     text, q_data = start_mock_test(chat_id, question_count, topic=topic)
     if q_data:
         topic_name = q_data.get("topic", "")
         topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
-        return text + "\n\n" + f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
-    return text
+        full = text + "\n\n" + f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
+    else:
+        full = text
+    await send_message(chat_id, full)
+    return "Mock test started. Content delivered to user."
 
 
 async def _start_study_session(chat_id: str, topic: str) -> str:
     from bot.quiz import start_study_session
-    from bot.memory import set_current_topic
-    set_current_topic(chat_id, topic)
+    from bot.whatsapp import send_message
     text, q_data = start_study_session(chat_id, topic)
     if q_data:
         topic_name = q_data.get("topic", "")
         topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
-        return text + "\n\n" + f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
-    return text
+        await send_message(chat_id, text)
+        await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
+    else:
+        await send_message(chat_id, text)
+    return f"Study session on '{topic}' started. Content delivered to user."
 
 
 async def _start_passage_quiz(chat_id: str, topic: str) -> str:
     from bot.quiz import start_passage_quiz
-    from bot.memory import set_current_topic
-    set_current_topic(chat_id, topic)
+    from bot.whatsapp import send_message
     text, q_data = start_passage_quiz(chat_id, topic)
     if q_data:
         topic_name = q_data.get("topic", "")
         topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
-        return text + "\n\n" + f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
-    return text
+        await send_message(chat_id, text)
+        await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
+    else:
+        await send_message(chat_id, text)
+    return f"Passage quiz on '{topic}' started. Content delivered to user."
 
 
 async def _get_current_affairs(chat_id: str) -> str:
