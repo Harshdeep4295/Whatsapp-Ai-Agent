@@ -228,6 +228,7 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
             # Execute text-format tool calls as if they were structured
             for i, (name, args) in enumerate(text_calls):
                 result = await execute_tool(name, args, chat_id)
+                result_str = str(result)
                 call_id = f"text_call_{i}"
                 messages.append({
                     "role": "assistant",
@@ -235,7 +236,9 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
                     "tool_calls": [{"id": call_id, "type": "function",
                                     "function": {"name": name, "arguments": json.dumps(args)}}],
                 })
-                messages.append({"role": "tool", "tool_call_id": call_id, "content": str(result)})
+                messages.append({"role": "tool", "tool_call_id": call_id, "content": result_str})
+                if result_str.startswith("Tool error:"):
+                    return "Something went wrong — could you try again?"
             continue  # let LLM respond naturally
 
         # Serialize tool_calls for message history
@@ -256,10 +259,13 @@ async def run_tool_loop(chat_id: str, user_text: str) -> str:
         for tc in msg.tool_calls:
             args = json.loads(tc.function.arguments)
             result = await execute_tool(tc.function.name, args, chat_id)
+            result_str = str(result)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": str(result)
+                "content": result_str
             })
+            if result_str.startswith("Tool error:"):
+                return "Something went wrong — could you try again?"
 
     return "I got confused — could you rephrase that?"

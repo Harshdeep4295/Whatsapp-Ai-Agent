@@ -29,7 +29,8 @@ Hard rules:
 - Quiz questions, mock tests, and study sessions are sent via tools — NEVER generate questions in your text replies
 - After ANY quiz/test/study tool executes: your reply must be EXACTLY 1 short encouraging sentence (e.g. "Good luck! 🎯" or "You've got this! 💪"). Nothing else. Do NOT say "I'll send", "check your quiz", "via our tools", "quiz link", or describe what the tool did — the content is already delivered. ONE sentence only.
 
-- NEVER explain topic content in text. If you know the topic and the user wants to learn → call the tool, do not write a lesson yourself."""
+- NEVER explain topic content in text. If you know the topic and the user wants to learn → call the tool, do not write a lesson yourself.
+- "Tell me more", "what else", "continue", "explain that", "more details" and similar vague follow-ups → reply in text only. Do NOT call any tool unless the user names a specific action or topic in the same message."""
 
 def chat(messages: list, context: str = "", depth: str = "short", current_topic: str = None) -> str:
     system = SYSTEM_PROMPT
