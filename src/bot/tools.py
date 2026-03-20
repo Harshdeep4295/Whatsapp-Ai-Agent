@@ -61,10 +61,10 @@ async def _start_study_session(chat_id: str, topic: str) -> str:
         topic_name = q_data.get("topic", "")
         topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
-        await send_message(chat_id, text)
-        await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
+        full = f"{text}\n\n{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
     else:
-        await send_message(chat_id, text)
+        full = text
+    await send_message(chat_id, full)
     return f"Study session on '{topic}' started. Content delivered to user."
 
 
@@ -76,10 +76,10 @@ async def _start_passage_quiz(chat_id: str, topic: str) -> str:
         topic_name = q_data.get("topic", "")
         topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
         opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
-        await send_message(chat_id, text)
-        await send_message(chat_id, f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_")
+        full = f"{text}\n\n{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
     else:
-        await send_message(chat_id, text)
+        full = text
+    await send_message(chat_id, full)
     return f"Passage quiz on '{topic}' started. Content delivered to user."
 
 
