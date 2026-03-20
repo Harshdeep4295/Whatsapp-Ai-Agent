@@ -76,7 +76,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "start_study_session",
-            "description": "Start a guided study session on a specific topic — teach + quiz combined. Use ONLY when user names a specific topic e.g. 'let\\'s study Polity', 'study session on Economy', 'teach me Haryana History'. Do NOT call for vague messages like 'I want to prepare for prelims' or 'help me study' — ask what topic they want.",
+            "description": "Start a guided study session (overview + 3 questions) on a topic. Call this when a study topic is clear — either stated directly ('study Polity') OR confirmed through conversation ('help me revise' → back-and-forth → topic is known). Do NOT wait for the user to restate the topic — if you've determined it, call this tool now.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -90,7 +90,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "start_passage_quiz",
-            "description": "Teach a topic from absolute scratch for a complete beginner — generates a simple reading passage on the topic, then asks 3 comprehension questions from that passage. Use when user says 'teach me from scratch', 'explain like I know nothing', 'I have no idea about X', 'zero to hero on X', 'start from basics', 'I am a beginner at X', or similar. Do NOT use for users who just want a quick quiz — use start_quiz for that.",
+            "description": "Teach a topic from scratch with a reading passage + 3 comprehension questions. Call when user says they know nothing / want basics / 'explain from scratch' / 'I\\'m a beginner' — even if topic came up during conversation, not the opening message.",
             "parameters": {
                 "type": "object",
                 "properties": {
