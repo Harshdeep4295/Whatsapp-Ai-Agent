@@ -10,6 +10,7 @@ numpy<2.0
 pymupdf
 langchain-text-splitters==0.3.2
 ddgs
+tavily-python
 beautifulsoup4
 feedparser
 apscheduler

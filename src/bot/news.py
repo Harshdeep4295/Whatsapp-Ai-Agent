@@ -1,7 +1,7 @@
 import re
 import hashlib
 import feedparser
-from bot.llm import get_client
+from bot.llm import create_completion
 from bot.web_search import search_news
 
 # Multiple feed pools — rotated to get fresh content each time
@@ -41,7 +41,7 @@ def _search_fresh_news(exam: str) -> list[tuple[str, str, str]]:
     """Fallback: DuckDuckGo search for latest Haryana news."""
     results = search_news("Haryana India current affairs today", max_results=8)
     return [
-        (r.get("title", ""), r.get("url", ""), r.get("body", "")[:200])
+        (r.get("title", ""), r.get("href", ""), r.get("body", "")[:200])
         for r in results if r.get("title")
     ]
 
@@ -90,20 +90,23 @@ def get_current_affairs(exam: str = "General", last_hash: str = None, seen_keys:
     if content_hash == last_hash:
         return None, last_hash, seen_keys or []
 
-    client = get_client()
-    r = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+    content = create_completion(
         messages=[{"role": "user", "content":
             "You are preparing current affairs notes for a Haryana Civil Services (HCS/HPSC) Prelims student.\n\n"
             "From these news stories, pick the 5 most relevant items for HCS exam (prioritise Haryana news, "
             "then national polity/economy/science/environment/government schemes).\n\n"
-            "For each item, write ONE bullet: *actual fact* (who/what/where/key number) — then 1 line on HCS relevance.\n\n"
-            "Rules: State real facts only. No study tips. No 'this relates to chapter X'.\n\n"
+            "For each item write ONE bullet in this format:\n"
+            "*bold headline* — one sentence with the real fact: specific numbers, names, dates, outcomes, locations.\n\n"
+            "Rules:\n"
+            "- No phrases like 'This is relevant to HCS', 'This relates to', 'important for exam'\n"
+            "- No coaching or study tips — just the news fact itself\n"
+            "- If it involves Haryana, lead with the Haryana angle\n"
+            "- Include a concrete detail (₹ amount, percentage, article number, person's name, location) in every bullet\n\n"
             f"Stories:\n{stories_text}"
         }],
         max_tokens=500,
     )
-    summary = "*HCS Current Affairs*\n\n" + r.choices[0].message.content
+    summary = "*HCS Current Affairs*\n\n" + content
 
     # Return updated seen keys (rolling window of last 30)
     new_seen = list(already_sent) + list(seen_in_batch)

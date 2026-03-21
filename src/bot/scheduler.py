@@ -161,17 +161,15 @@ def _generate_content(job: dict) -> tuple[str, str]:
             content_hash = hashlib.md5(snippets.encode()).hexdigest()
             if content_hash == last_hash:
                 return None, last_hash
-            from bot.llm import get_client
-            client = get_client()
-            r = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+            from bot.llm import create_completion
+            result = create_completion(
                 messages=[{"role": "user", "content":
                     f"Summarize this for a {exam} student studying {subject}. "
                     f"3-4 key points only:\n{snippets}"
                 }],
                 max_tokens=250,
             )
-            content = f"*{exam} — {subject} Update*\n\n" + r.choices[0].message.content
+            content = f"*{exam} — {subject} Update*\n\n" + result
             return content, content_hash
         except Exception as e:
             print(f"[scheduler] study material fetch failed: {e}")
@@ -221,7 +219,7 @@ def _generate_content(job: dict) -> tuple[str, str]:
 def _generate_nightly_revision(job: dict) -> tuple[str, str]:
     import hashlib
     from datetime import datetime, timezone, timedelta
-    from bot.llm import get_client
+    from bot.llm import create_completion
 
     chat_id = job["chat_id"]
     last_hash = job.get("last_content_hash")
@@ -270,10 +268,8 @@ def _generate_nightly_revision(job: dict) -> tuple[str, str]:
         convo_text = "\n".join(
             f"{m['role'].upper()}: {m['content'][:200]}" for m in messages[-30:]
         )
-        client = get_client()
         try:
-            r = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+            today_summary = create_completion(
                 messages=[{"role": "user", "content":
                     "From this HCS study chat, extract:\n"
                     "1. Topics the student studied today (list up to 4, short names)\n"
@@ -283,7 +279,6 @@ def _generate_nightly_revision(job: dict) -> tuple[str, str]:
                 }],
                 max_tokens=200,
             )
-            today_summary = r.choices[0].message.content.strip()
         except Exception:
             today_summary = ""
 

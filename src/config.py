@@ -14,3 +14,4 @@ SUPABASE_SERVICE_KEY     = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPAB
 CHROMA_PATH              = os.getenv("CHROMA_PATH", "./data/chroma_db")
 PDFS_PATH                = os.getenv("PDFS_PATH", "./data/pdfs")
 ADMIN_CHAT_ID            = os.getenv("ADMIN_CHAT_ID", "")
+TAVILY_API_KEY           = os.getenv("TAVILY_API_KEY", "")
