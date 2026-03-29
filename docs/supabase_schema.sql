@@ -24,15 +24,17 @@ create index on content_cache(exam, content_type);
 
 -- Scheduled jobs per user
 create table scheduled_jobs (
-  id               bigserial primary key,
-  chat_id          text not null,
-  job_type         text not null,
-  interval_minutes int not null,
-  exam             text default 'HCS',
-  subject          text default '',
-  next_run_at      timestamptz not null,
-  active           boolean default true,
-  created_at       timestamptz default now()
+  id                bigserial primary key,
+  chat_id           text not null,
+  job_type          text not null,
+  interval_minutes  int not null,
+  exam              text default 'HCS',
+  subject           text default '',
+  next_run_at       timestamptz not null,
+  active            boolean default true,
+  seen_keys         jsonb,        -- rolling list of story keys already sent to this user
+  last_content_hash text,         -- MD5 hash of last sent content, used to skip duplicates
+  created_at        timestamptz default now()
 );
 create index on scheduled_jobs(active, next_run_at);
 
@@ -51,3 +53,13 @@ create table quiz_sessions (
   active         boolean default true,
   created_at     timestamptz default now()
 );
+
+-- ---------------------------------------------------------------------------
+-- Migration: add deduplication columns to scheduled_jobs
+-- Run these two statements in the Supabase SQL editor for existing databases.
+-- ---------------------------------------------------------------------------
+alter table scheduled_jobs
+  add column if not exists seen_keys         jsonb;        -- rolling list of story keys already sent to this user
+
+alter table scheduled_jobs
+  add column if not exists last_content_hash text;         -- MD5 hash of last sent content, used to skip duplicates

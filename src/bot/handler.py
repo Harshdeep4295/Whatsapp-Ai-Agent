@@ -93,6 +93,14 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         history = get_history(chat_id)
         if not history:
             save_message(chat_id, "assistant", WELCOME_MSG)
+            # Auto-schedule nightly revision at 10 PM IST (16:30 UTC) for new users.
+            # schedule_job deactivates any existing same-type job first, so re-onboarding
+            # won't create duplicates.
+            try:
+                from bot.scheduler import schedule_job, _next_1630_utc
+                schedule_job(chat_id, "nightly_revision", 1440, next_run_at=_next_1630_utc())
+            except Exception as e:
+                print(f"[handler] failed to auto-schedule nightly_revision for {chat_id}: {e}")
             return WELCOME_MSG
         try:
             from bot.supabase_client import get_sb

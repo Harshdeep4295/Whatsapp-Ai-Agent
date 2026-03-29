@@ -54,21 +54,31 @@ def parse_interval(text: str) -> int:
         return n * 60 if 'hour' in unit or 'hr' in unit else n
     return 60
 
-def schedule_job(chat_id: str, job_type: str, interval_minutes: int, exam: str = "HCS", subject: str = "") -> str:
+def _next_1630_utc() -> datetime:
+    """Return the next occurrence of 16:30 UTC (10 PM IST) from now."""
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=16, minute=30, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target
+
+
+def schedule_job(chat_id: str, job_type: str, interval_minutes: int, exam: str = "HCS", subject: str = "", next_run_at: datetime | None = None) -> str:
     # Deactivate any existing same-type job for this user
     sb.table("scheduled_jobs")\
         .update({"active": False})\
         .eq("chat_id", chat_id).eq("job_type", job_type)\
         .execute()
 
-    now = datetime.now(timezone.utc)
+    if next_run_at is None:
+        next_run_at = datetime.now(timezone.utc)
     sb.table("scheduled_jobs").insert({
         "chat_id": chat_id,
         "job_type": job_type,
         "interval_minutes": interval_minutes,
         "exam": exam,
         "subject": subject,
-        "next_run_at": now.isoformat(),
+        "next_run_at": next_run_at.isoformat(),
         "active": True,
     }).execute()
 
@@ -91,6 +101,20 @@ def cancel_jobs(chat_id: str) -> str:
         return "All your scheduled updates have been cancelled."
     return "You don't have any active scheduled updates."
 
+def _is_within_24h_window(last_active_date: str | None) -> bool:
+    """Return True if last_active_date is today or yesterday (UTC), i.e. within ~24h window."""
+    if not last_active_date:
+        return False
+    from datetime import date, timedelta
+    today = date.today()  # UTC (scheduler runs in UTC)
+    yesterday = today - timedelta(days=1)
+    try:
+        lad = date.fromisoformat(last_active_date)
+        return lad >= yesterday
+    except Exception:
+        return False
+
+
 async def _run_due_jobs():
     now = datetime.now(timezone.utc)
     res = sb.table("scheduled_jobs")\
@@ -99,11 +123,34 @@ async def _run_due_jobs():
         .lte("next_run_at", now.isoformat())\
         .execute()
 
-    for job in (res.data or []):
+    jobs = res.data or []
+
+    # Batch-fetch last_active_date for all unique chat_ids in one query
+    chat_ids = list({job["chat_id"] for job in jobs})
+    last_active_by_chat: dict[str, str | None] = {}
+    if chat_ids:
         try:
-            content, content_hash = _generate_content(job)
+            profiles_res = sb.table("user_profiles")\
+                .select("chat_id,last_active_date")\
+                .in_("chat_id", chat_ids)\
+                .execute()
+            for row in (profiles_res.data or []):
+                last_active_by_chat[row["chat_id"]] = row.get("last_active_date")
+        except Exception as e:
+            print(f"[scheduler] failed to fetch user_profiles for 24h check: {e}")
+
+    for job in jobs:
+        try:
             next_run = now + timedelta(minutes=job["interval_minutes"])
             update = {"next_run_at": next_run.isoformat()}
+
+            last_active = last_active_by_chat.get(job["chat_id"])
+            if not _is_within_24h_window(last_active):
+                print(f"[scheduler] job {job['id']} — skipped, user outside 24h window (last_active_date={last_active})")
+                sb.table("scheduled_jobs").update(update).eq("id", job["id"]).execute()
+                continue
+
+            content, content_hash = _generate_content(job)
 
             if content:
                 await send_message(job["chat_id"], content)
@@ -320,10 +367,78 @@ def _generate_nightly_revision(job: dict) -> tuple[str, str]:
 
     return content, content_hash
 
+NUDGE_MESSAGE = (
+    "📚 *Haven't studied today yet?*\n\n"
+    "Keep your streak alive! Try a quick quiz or mock test.\n"
+    "Reply *quiz me* to start, or *mock test* for a full practice session."
+)
+
+async def _check_inactive_users():
+    """Every 4 hours: nudge users who haven't studied today (UTC) and were active in the last 7 days."""
+    from datetime import date
+
+    # Only send nudges between 8 AM and 10 PM IST (02:30–16:30 UTC)
+    now_utc = datetime.now(timezone.utc)
+    utc_minutes = now_utc.hour * 60 + now_utc.minute
+    if not (150 <= utc_minutes <= 990):  # 02:30 = 150 min, 16:30 = 990 min
+        print("[scheduler] inactivity nudge skipped — outside 8 AM–10 PM IST window")
+        return
+
+    today = date.today().isoformat()
+    seven_days_ago = (date.today() - timedelta(days=7)).isoformat()
+
+    try:
+        res = sb.table("user_profiles")\
+            .select("chat_id,last_active_date")\
+            .not_.is_("last_active_date", "null")\
+            .gte("last_active_date", seven_days_ago)\
+            .neq("last_active_date", today)\
+            .execute()
+        inactive_users = res.data or []
+    except Exception as e:
+        print(f"[scheduler] inactivity check — failed to query user_profiles: {e}")
+        return
+
+    if not inactive_users:
+        print("[scheduler] inactivity check — no inactive users to nudge")
+        return
+
+    print(f"[scheduler] inactivity check — {len(inactive_users)} candidate(s)")
+
+    for user in inactive_users:
+        chat_id = user["chat_id"]
+        try:
+            # Check if we already sent a nudge today to avoid double-nudging
+            today_start = f"{today}T00:00:00+00:00"
+            conv_res = sb.table("conversations")\
+                .select("id")\
+                .eq("chat_id", chat_id)\
+                .eq("role", "assistant")\
+                .gte("created_at", today_start)\
+                .ilike("content", "%Haven't studied today yet%")\
+                .limit(1)\
+                .execute()
+            if conv_res.data:
+                print(f"[scheduler] nudge already sent today to {chat_id} — skipping")
+                continue
+
+            await send_message(chat_id, NUDGE_MESSAGE)
+            # Record the nudge in conversations so we don't send again today
+            sb.table("conversations").insert({
+                "chat_id": chat_id,
+                "role": "assistant",
+                "content": NUDGE_MESSAGE,
+            }).execute()
+            print(f"[scheduler] nudge sent to {chat_id}")
+        except Exception as e:
+            print(f"[scheduler] nudge failed for {chat_id}: {e}")
+
+
 def start_scheduler():
     global _scheduler
     _scheduler = AsyncIOScheduler(timezone="UTC")
     _scheduler.add_job(_run_due_jobs, "interval", minutes=1, id="job_runner")
+    _scheduler.add_job(_check_inactive_users, "interval", hours=4, id="inactivity_checker")
     _scheduler.start()
     print("[scheduler] started")
 
