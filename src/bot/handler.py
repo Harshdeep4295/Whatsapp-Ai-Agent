@@ -225,7 +225,13 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         )
 
     # --- Start auto drills ---
-    start_auto_drill_triggers = {"start auto drills", "start drills", "auto drills on", "start fact drills", "schedule drills"}
+    start_auto_drill_triggers = {
+        "start auto drills", "start auto drill",
+        "start drills", "start drill",
+        "auto drills on", "auto drill on",
+        "start fact drills", "start fact drill",
+        "schedule drills", "schedule drill",
+    }
     if any(t in lower for t in start_auto_drill_triggers):
         from bot.scheduler import schedule_job
         schedule_job(chat_id, "fact_drill", 120)
@@ -238,7 +244,13 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         return reply
 
     # --- Stop auto drills ---
-    stop_auto_drill_triggers = {"stop auto drills", "stop drills", "auto drills off", "cancel drills", "pause drills"}
+    stop_auto_drill_triggers = {
+        "stop auto drills", "stop auto drill",
+        "stop drills", "stop drill",
+        "auto drills off", "auto drill off",
+        "cancel drills", "cancel drill",
+        "pause drills", "pause drill",
+    }
     if any(t in lower for t in stop_auto_drill_triggers):
         from bot.supabase_client import get_sb as _get_sb
         _get_sb().table("scheduled_jobs")\
@@ -251,7 +263,7 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
 
     # --- HPSC blueprint mock trigger ---
     # --- On-demand fact drill trigger ---
-    drill_triggers = {"drill me", "fact drill", "2 hour drill", "daily drill", "give me a drill", "start drill"}
+    drill_triggers = {"drill me", "fact drill", "2 hour drill", "daily drill", "give me a drill"}
     if any(t in lower for t in drill_triggers):
         from bot.scheduler import _generate_fact_with_question_context
         from bot.quiz import _get_adaptive_topic, _generate
