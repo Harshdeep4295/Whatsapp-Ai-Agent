@@ -287,9 +287,23 @@ def _generate_daily_facts(topics: list) -> str:
         return ""
 
 
+def _generate_fact_with_question_context(question_text: str) -> str:
+    """Generate 1 fact directly aligned to the question being asked."""
+    from bot.llm import create_completion
+    try:
+        fact = create_completion(
+            messages=[{"role": "user", "content": DAILY_FACT_PROMPT_WITH_CONTEXT.format(question=question_text)}],
+            max_tokens=120,
+            temperature=0.9,
+        )
+        return f"*📌 Did You Know?*\n\n{fact.strip()}"
+    except Exception as e:
+        print(f"[scheduler] context-aware fact failed: {e}")
+        return ""
+
+
 def _generate_fact_drill(job: dict) -> tuple[str, str]:
-    """Every 2 hours (no time restriction): send one fact + one question on an adaptive topic.
-    Stores the question in quiz_sessions so user can reply A/B/C/D."""
+    """Every 2 hours: send one fact on an adaptive topic. No quiz question — keeps it lightweight."""
     import hashlib
     import random
 
@@ -297,62 +311,30 @@ def _generate_fact_drill(job: dict) -> tuple[str, str]:
     last_hash = job.get("last_content_hash")
     seen_hashes = list(job.get("seen_keys") or [])
 
-    from bot.quiz import _get_adaptive_topic, _generate, _fmt, HCS_GS_TOPICS
+    from bot.quiz import _get_adaptive_topic, HCS_GS_TOPICS
 
-    # Pick topic adaptive to user's weak areas
     try:
         topic = _get_adaptive_topic(chat_id, "")
     except Exception:
         topic = random.choice(HCS_GS_TOPICS)
 
-    # Generate fact and question on the same topic
     fact_block = _generate_daily_facts([topic])
+    if not fact_block:
+        return None, ""
 
-    try:
-        q = _generate(topic)
-    except Exception as e:
-        print(f"[scheduler] fact_drill question generation failed: {e}")
-        # Send just the fact if question fails
-        if not fact_block:
-            return None, ""
-        content = f"⏰ *Study Drill — {topic}*\n\n{fact_block}"
-        content_hash = hashlib.md5(content.encode()).hexdigest()
-        return (None if content_hash == last_hash else content), content_hash
+    content = f"⏰ *Fact of the Day — {topic}*\n\n{fact_block}"
+    content_hash = hashlib.md5(content.encode()).hexdigest()
 
-    content_hash = hashlib.md5(q["question"].encode()).hexdigest()
-    # Regenerate once if this question was recently seen
-    if content_hash in seen_hashes:
+    if content_hash == last_hash or content_hash in seen_hashes:
+        # Regenerate with a different topic
         try:
-            q = _generate(topic)
-            content_hash = hashlib.md5(q["question"].encode()).hexdigest()
+            topic = random.choice(HCS_GS_TOPICS)
+            fact_block = _generate_daily_facts([topic])
+            content = f"⏰ *Fact of the Day — {topic}*\n\n{fact_block}"
+            content_hash = hashlib.md5(content.encode()).hexdigest()
         except Exception:
-            pass  # keep original if regeneration fails
+            return None, last_hash or ""
 
-    # Only attach question if no active quiz or mock test
-    question_part = ""
-    try:
-        active_quiz = sb.table("quiz_sessions").select("id")\
-            .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
-        active_mock = sb.table("mock_tests").select("id")\
-            .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
-
-        if not active_quiz.data and not active_mock.data:
-            sb.table("quiz_sessions").upsert({
-                "chat_id": chat_id, "exam": "HCS", "subject": q.get("_topic", topic),
-                "question": q["question"], "options": q["options"],
-                "correct_answer": q["correct"], "explanation": q["explanation"],
-                "active": True, "score": 0, "total": 0,
-            }, on_conflict="chat_id").execute()
-            question_part = f"\n\nTest yourself 👇\n\n{_fmt(q)}"
-    except Exception as e:
-        print(f"[scheduler] fact_drill quiz_session store failed: {e}")
-
-    content = f"⏰ *2-Hour Drill — {topic}*\n\n{fact_block}{question_part}"
-
-    if content_hash == last_hash:
-        return None, last_hash
-
-    # Update seen_hashes: keep last 50 question hashes to avoid repeats
     seen_hashes.append(content_hash)
     if len(seen_hashes) > 50:
         seen_hashes = seen_hashes[-50:]
@@ -503,6 +485,21 @@ DAILY_FACT_PROMPT = (
     "Output format:\n"
     "• By the way — [fact 1]. _(Why it matters: ...)_\n"
     "• [fact 2]. _(Why it matters: ...)_"
+)
+
+DAILY_FACT_PROMPT_WITH_CONTEXT = (
+    "You are Yudhister, an HCS professor. A student is about to answer this question:\n\n"
+    "{question}\n\n"
+    "Generate exactly 1 surprising fact that directly relates to the concept in this question. "
+    "It should help the student understand the topic better before answering.\n\n"
+    "Rules:\n"
+    "- One memorable fact under 40 words\n"
+    "- Must be directly about the same concept/event/topic as the question\n"
+    "- Add '_(Why it matters: ...)_' after the fact\n"
+    "- Start with 'By the way —'\n"
+    "- No preamble like 'Here are' or 'Sure!'\n\n"
+    "Output:\n"
+    "• By the way — [fact]. _(Why it matters: ...)_"
 )
 
 async def _check_inactive_users():

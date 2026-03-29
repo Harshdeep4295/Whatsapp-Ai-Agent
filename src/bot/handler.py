@@ -41,6 +41,7 @@ GREETINGS = {"hi", "hello", "hey", "hii", "helo", "helloo", "heyy", "yo", "sup",
 
 STOP_PHRASES = {"stop", "quit", "end", "end quiz", "stop quiz", "end test", "stop test",
                 "end session", "stop session"}
+SKIP_PHRASES = {"don't know", "dont know", "idk", "skip", "pass", "no idea", "not sure", "?"}
 
 
 async def _quiz_reply(chat_id: str, text: str, q_data: dict | None) -> None:
@@ -54,9 +55,72 @@ async def _quiz_reply(chat_id: str, text: str, q_data: dict | None) -> None:
         await send_message(chat_id, q_text)
 
 
+def _get_drill_session(chat_id: str) -> bool:
+    """Return True if the active quiz_session is tagged as a DRILL (not a regular quiz)."""
+    try:
+        from bot.supabase_client import get_sb
+        res = get_sb().table("quiz_sessions").select("exam")\
+            .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
+        return bool(res.data and res.data[0].get("exam") == "DRILL")
+    except Exception:
+        return False
+
+
+def _reschedule_drill(chat_id: str, minutes: int = 45) -> None:
+    """Move the active fact_drill job's next_run_at to now + minutes.
+    Creates a new job if none exists."""
+    from datetime import datetime, timezone, timedelta
+    from bot.supabase_client import get_sb
+    next_run = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    try:
+        res = get_sb().table("scheduled_jobs")\
+            .update({"next_run_at": next_run.isoformat()})\
+            .eq("chat_id", chat_id).eq("job_type", "fact_drill").eq("active", True)\
+            .execute()
+        if not res.data:
+            from bot.scheduler import schedule_job
+            schedule_job(chat_id, "fact_drill", minutes, next_run_at=next_run)
+    except Exception as e:
+        print(f"[handler] _reschedule_drill failed: {e}")
+
+
+async def _maybe_fire_overdue_drill(chat_id: str) -> None:
+    """If a fact_drill job is overdue and the user just messaged in, send the drill now
+    instead of waiting for the background scheduler tick."""
+    from datetime import datetime, timezone, timedelta
+    from bot.supabase_client import get_sb
+    try:
+        now = datetime.now(timezone.utc)
+        res = get_sb().table("scheduled_jobs")\
+            .select("*")\
+            .eq("chat_id", chat_id).eq("job_type", "fact_drill").eq("active", True)\
+            .lte("next_run_at", now.isoformat())\
+            .limit(1).execute()
+        if not res.data:
+            return
+        job = res.data[0]
+        from bot.scheduler import _generate_fact_drill
+        content, content_hash = _generate_fact_drill(job)
+        if content:
+            await send_message(chat_id, content)
+            next_run = now + timedelta(minutes=job.get("interval_minutes", 120))
+            get_sb().table("scheduled_jobs").update({
+                "next_run_at": next_run.isoformat(),
+                "last_content_hash": content_hash,
+            }).eq("id", job["id"]).execute()
+    except Exception as e:
+        print(f"[handler] _maybe_fire_overdue_drill failed: {e}")
+
+
 async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bool = False) -> str | None:
     save_message(chat_id, "user", user_text)
     update_streak(chat_id)
+
+    # Fire overdue drill immediately when the user comes back (skip if mid-session)
+    if not (has_active_quiz(chat_id) or has_active_mock_test(chat_id)
+            or has_active_study_session(chat_id) or has_active_passage_quiz(chat_id)):
+        await _maybe_fire_overdue_drill(chat_id)
+
     lower = user_text.strip().lower()
 
     # --- Admin nuclear reset (Harshdeep only) ---
@@ -160,23 +224,58 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             or bool(_re.search(r'\bq\d+[\.\s]', t))
         )
 
+    # --- Start auto drills ---
+    start_auto_drill_triggers = {"start auto drills", "start drills", "auto drills on", "start fact drills", "schedule drills"}
+    if any(t in lower for t in start_auto_drill_triggers):
+        from bot.scheduler import schedule_job
+        schedule_job(chat_id, "fact_drill", 120)
+        reply = (
+            "Auto drills started! ✅\n\n"
+            "You'll get a new fact every 2 hours. "
+            "Say *drill me* anytime for an on-demand drill, or *stop auto drills* to cancel."
+        )
+        save_message(chat_id, "assistant", reply)
+        return reply
+
+    # --- Stop auto drills ---
+    stop_auto_drill_triggers = {"stop auto drills", "stop drills", "auto drills off", "cancel drills", "pause drills"}
+    if any(t in lower for t in stop_auto_drill_triggers):
+        from bot.supabase_client import get_sb as _get_sb
+        _get_sb().table("scheduled_jobs")\
+            .update({"active": False})\
+            .eq("chat_id", chat_id).eq("job_type", "fact_drill")\
+            .execute()
+        reply = "Auto drills paused. ✅ Say *start auto drills* or *drill me* to resume."
+        save_message(chat_id, "assistant", reply)
+        return reply
+
     # --- HPSC blueprint mock trigger ---
     # --- On-demand fact drill trigger ---
     drill_triggers = {"drill me", "fact drill", "2 hour drill", "daily drill", "give me a drill", "start drill"}
     if any(t in lower for t in drill_triggers):
-        from bot.scheduler import _generate_fact_drill
+        from bot.scheduler import _generate_fact_with_question_context
+        from bot.quiz import _get_adaptive_topic, _generate
         await send_message(chat_id, "Loading your drill... 🧠")
         try:
-            # Build a minimal job dict for the generator
-            content, _ = _generate_fact_drill({"chat_id": chat_id, "last_content_hash": None})
-            if content:
-                save_message(chat_id, "assistant", content)
-                await send_message(chat_id, content)
-            else:
-                await send_message(chat_id, "Couldn't generate a drill right now. Try again in a moment!")
+            topic = _get_adaptive_topic(chat_id, "")
+            q = _generate(topic)
+            fact = _generate_fact_with_question_context(q["question"])
+            text_part = f"⏰ *Drill — {topic}*"
+            if fact:
+                text_part += f"\n\n{fact}"
+            text_part += "\n\nTest yourself 👇"
+            q_data = {"question": q["question"], "options": q["options"], "topic": q.get("_topic", topic)}
+            from bot.supabase_client import get_sb
+            get_sb().table("quiz_sessions").upsert({
+                "chat_id": chat_id, "exam": "DRILL", "subject": q.get("_topic", topic),
+                "question": q["question"], "options": q["options"],
+                "correct_answer": q["correct"], "explanation": q["explanation"],
+                "active": True, "score": 0, "total": 0,
+            }, on_conflict="chat_id").execute()
+            await _quiz_reply(chat_id, text_part, q_data)
         except Exception as e:
-            print(f"[handler] fact_drill trigger failed: {e}")
-            await send_message(chat_id, "Something went wrong. Please try again!")
+            print(f"[handler] drill me failed: {e}")
+            await send_message(chat_id, "Couldn't load drill right now. Try again!")
         return None
 
     hpsc_mock_triggers = {"hpsc mock", "blueprint mock", "full mock test", "paper 1 mock", "100 question mock", "hpsc full mock"}
@@ -217,6 +316,10 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             get_sb().table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
             await _quiz_reply(chat_id, "Mock test ended.", None)
             return None
+        if lower in SKIP_PHRASES:
+            text, q_data = check_mock_answer(chat_id, "X")
+            await _quiz_reply(chat_id, text, q_data)
+            return None
         if _is_answer(user_text):
             # Batch answers: "Q1 C...\nQ2 B..." — extract each and process sequentially
             batch = _re.findall(r'q\d+[.\s]+([a-d])', lower)
@@ -250,6 +353,9 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             set_current_topic(chat_id, None)
             await _quiz_reply(chat_id, "Study session ended.", None)
             return None
+        if lower in SKIP_PHRASES:
+            await _quiz_reply(chat_id, *check_study_answer(chat_id, "X"))
+            return None
         if _is_answer(user_text):
             await _quiz_reply(chat_id, *check_study_answer(chat_id, user_text))
             return None
@@ -259,11 +365,39 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         if lower in STOP_PHRASES:
             await _quiz_reply(chat_id, *stop_quiz(chat_id))
             return None
+        if lower in SKIP_PHRASES:
+            is_drill = _get_drill_session(chat_id)
+            await _quiz_reply(chat_id, *check_answer(chat_id, "X"))
+            if is_drill:
+                _reschedule_drill(chat_id, 45)
+            return None
         if _is_answer(user_text):
+            is_drill = _get_drill_session(chat_id)
             await _quiz_reply(chat_id, *check_answer(chat_id, user_text))
+            if is_drill:
+                _reschedule_drill(chat_id, 45)
             return None
 
-    # --- Tool loop ---
-    reply = await run_tool_loop(chat_id, user_text)
+    # --- Tool loop (with pending-question reminder if off-topic) ---
+    augmented_text = user_text
+    try:
+        if has_active_quiz(chat_id) or has_active_mock_test(chat_id):
+            from bot.supabase_client import get_sb as _get_sb2
+            sq = _get_sb2().table("quiz_sessions").select("question,options")\
+                .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
+            if sq.data:
+                _q = sq.data[0]
+                _opts = "\n".join(f"{k}. {v}" for k, v in (_q.get("options") or {}).items())
+                augmented_text = (
+                    f"{user_text}\n\n"
+                    f"[System note — not from user: There is a pending quiz question the student hasn't answered yet. "
+                    f"Answer their question above first, then gently remind them at the end: "
+                    f"'By the way, your quiz question is still waiting 👆'\n"
+                    f"Pending question:\n{_q['question']}\n{_opts}]"
+                )
+    except Exception:
+        pass
+
+    reply = await run_tool_loop(chat_id, augmented_text)
     save_message(chat_id, "assistant", reply)
     return reply

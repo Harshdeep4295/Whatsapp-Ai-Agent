@@ -256,10 +256,12 @@ async def _search_and_summarise(chat_id: str, query: str) -> str:
     from bot.web_search import search_web
     from bot.llm import create_completion
 
-    search_query = query
     lower = query.lower()
-    if "hcs" not in lower and "haryana" not in lower and len(query.split()) <= 6:
-        search_query = f"{query} HCS exam India"
+    # Always include HCS context in the search query so results stay exam-relevant
+    if "hcs" not in lower and "haryana" not in lower:
+        search_query = f"{query} Haryana civil services HCS exam"
+    else:
+        search_query = query
 
     results = search_web(search_query, max_results=4)
     if not results:
@@ -275,9 +277,9 @@ async def _search_and_summarise(chat_id: str, query: str) -> str:
     summary = create_completion(
         messages=[{"role": "user", "content":
             f"You are Yudhister, HCS exam coach. A student asked: \"{query}\"\n\n"
-            f"Using ONLY the information in these search results, give a clear answer in 3-5 bullet points. "
-            f"If a point is relevant for HCS exam, add '(HCS tip: ...)' after it. "
-            f"Do NOT add facts not in the sources.\n\nSearch results:\n{snippets}"
+            f"Using ONLY the information in these search results, give a clear HCS-focused answer in 3-5 bullet points. "
+            f"Every point must connect back to the HCS exam — if a fact has exam relevance, add '(HCS: ...)'. "
+            f"Omit anything not relevant to HCS preparation. Do NOT add facts not in the sources.\n\nSearch results:\n{snippets}"
         }],
         max_tokens=350,
         temperature=0.6,

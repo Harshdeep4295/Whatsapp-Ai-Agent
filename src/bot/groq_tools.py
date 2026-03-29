@@ -207,11 +207,13 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "search_and_summarise",
             "description": (
-                "Search the web and return a summarised answer. Use this when the user asks to "
-                "search for something, look up recent information, 'update me on X', 'what's the latest on Y', "
-                "'find out about Z', or asks a factual question you cannot answer from memory. "
-                "DO NOT use for news/current affairs — use get_current_affairs for that. "
-                "DO NOT use for quiz or syllabus questions — use the appropriate quiz tool."
+                "Search the web for HCS exam-relevant information and return a summarised answer. "
+                "Use ONLY when the user asks about an HCS-related topic you cannot answer from memory — "
+                "e.g. 'search Haryana budget 2025', 'what's the latest on HPSC notification', "
+                "'update me on Haryana agriculture policy', 'find out about [HCS syllabus topic]'. "
+                "DO NOT use for general current affairs — use get_current_affairs for that. "
+                "DO NOT use for quiz or syllabus questions — use the appropriate quiz tool. "
+                "DO NOT use for questions unrelated to HCS exam preparation."
             ),
             "parameters": {
                 "type": "object",
