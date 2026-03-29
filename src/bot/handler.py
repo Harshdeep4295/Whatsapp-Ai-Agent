@@ -14,10 +14,25 @@ from bot.quiz import (
 from bot.whatsapp import send_message
 
 WELCOME_MSG = (
-    "Hey! I'm *Yudhister* 👋 Your HCS exam prep buddy.\n\n"
-    "I'm here to help you crack the *Haryana Civil Services (HPSC)* exam. "
-    "We can do syllabus, practice questions, current affairs, study plans — whatever you need.\n\n"
-    "Where do you want to start?"
+    "Hey! I'm *Yudhister* 👋 — your personal HCS exam coach.\n\n"
+    "Here's everything I can do for you:\n\n"
+    "*📝 Practice & Tests*\n"
+    "• *quiz me* — adaptive questions on your weak topics\n"
+    "• *hpsc mock* — 25-question blueprint mock (real exam format)\n"
+    "• *haryana special* — Haryana-only drill (folk culture, 1857, geography)\n"
+    "• *mock test* — quick 10-question test on any topic\n\n"
+    "*📚 Study*\n"
+    "• *study [topic]* — passage + comprehension on any topic\n"
+    "• *explain [topic]* — guided study session with questions\n"
+    "• *current affairs* — latest HCS-relevant news\n"
+    "• *search [anything]* — I'll look it up and summarise for you\n\n"
+    "*⏰ Drills & Tracking*\n"
+    "• *drill me* — instant fact + question on your weakest topic\n"
+    "• *my progress* — see your topic-wise accuracy\n"
+    "• *wrong answers* — review your mistakes\n"
+    "• *set exam date [date]* — I'll track your countdown\n\n"
+    "I also send you a *2-hour drill* automatically — a fact + question every 2 hours to keep you sharp.\n\n"
+    "What do you want to start with? 🎯"
 )
 
 GREETINGS = {"hi", "hello", "hey", "hii", "helo", "helloo", "heyy", "yo", "sup",
@@ -93,14 +108,14 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         history = get_history(chat_id)
         if not history:
             save_message(chat_id, "assistant", WELCOME_MSG)
-            # Auto-schedule nightly revision at 10 PM IST (16:30 UTC) for new users.
+            # Auto-schedule 2-hour fact drills for new users (no time restriction).
             # schedule_job deactivates any existing same-type job first, so re-onboarding
             # won't create duplicates.
             try:
-                from bot.scheduler import schedule_job, _next_1630_utc
-                schedule_job(chat_id, "nightly_revision", 1440, next_run_at=_next_1630_utc())
+                from bot.scheduler import schedule_job
+                schedule_job(chat_id, "fact_drill", 120)  # fact + question every 2 hours, 8 AM–10 PM IST
             except Exception as e:
-                print(f"[handler] failed to auto-schedule nightly_revision for {chat_id}: {e}")
+                print(f"[handler] failed to auto-schedule fact_drill for {chat_id}: {e}")
             return WELCOME_MSG
         try:
             from bot.supabase_client import get_sb
@@ -146,19 +161,53 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         )
 
     # --- HPSC blueprint mock trigger ---
+    # --- On-demand fact drill trigger ---
+    drill_triggers = {"drill me", "fact drill", "2 hour drill", "daily drill", "give me a drill", "start drill"}
+    if any(t in lower for t in drill_triggers):
+        from bot.scheduler import _generate_fact_drill
+        await send_message(chat_id, "Loading your drill... 🧠")
+        try:
+            # Build a minimal job dict for the generator
+            content, _ = _generate_fact_drill({"chat_id": chat_id, "last_content_hash": None})
+            if content:
+                save_message(chat_id, "assistant", content)
+                await send_message(chat_id, content)
+            else:
+                await send_message(chat_id, "Couldn't generate a drill right now. Try again in a moment!")
+        except Exception as e:
+            print(f"[handler] fact_drill trigger failed: {e}")
+            await send_message(chat_id, "Something went wrong. Please try again!")
+        return None
+
     hpsc_mock_triggers = {"hpsc mock", "blueprint mock", "full mock test", "paper 1 mock", "100 question mock", "hpsc full mock"}
     if any(t in lower for t in hpsc_mock_triggers):
         from bot.quiz import start_hpsc_mock
-        text_part, q_data = start_hpsc_mock(chat_id, n=25)
-        await _quiz_reply(chat_id, text_part, q_data)
+        await send_message(chat_id, "Starting your HPSC Blueprint Mock... generating questions now. 🧠")
+        try:
+            text_part, q_data = start_hpsc_mock(chat_id, n=25)
+            if q_data is None:
+                await send_message(chat_id, text_part)
+            else:
+                await _quiz_reply(chat_id, text_part, q_data)
+        except Exception as e:
+            print(f"[handler] hpsc_mock failed: {e}")
+            await send_message(chat_id, "Sorry, I had trouble generating the mock test. Please try again in a moment!")
         return None
 
     # --- Haryana special drill trigger ---
     haryana_triggers = {"haryana special", "haryana quiz", "haryana drill", "haryana only", "haryana culture quiz"}
     if any(t in lower for t in haryana_triggers):
         from bot.quiz import start_haryana_special
-        text_part, q_data = start_haryana_special(chat_id, n=10)
-        await _quiz_reply(chat_id, text_part, q_data)
+        await send_message(chat_id, "Loading Haryana special drill — these are the cutoff-deciding topics! 🏛️")
+        try:
+            text_part, q_data = start_haryana_special(chat_id, n=10)
+            if q_data is None:
+                await send_message(chat_id, text_part)
+            else:
+                await _quiz_reply(chat_id, text_part, q_data)
+        except Exception as e:
+            print(f"[handler] haryana_special failed: {e}")
+            await send_message(chat_id, "Sorry, had trouble generating those questions. Please try again!")
         return None
 
     # --- Active mock test intercept ---

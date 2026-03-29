@@ -102,15 +102,17 @@ def cancel_jobs(chat_id: str) -> str:
     return "You don't have any active scheduled updates."
 
 def _is_within_24h_window(last_active_date: str | None) -> bool:
-    """Return True if last_active_date is today or yesterday (UTC), i.e. within ~24h window."""
+    """Return True if last_active_date is within the last 3 days (UTC).
+    Wider than the WhatsApp 24h window to avoid silently skipping users
+    who studied 1-2 days ago and haven't opened WhatsApp yet today."""
     if not last_active_date:
         return False
     from datetime import date, timedelta
     today = date.today()  # UTC (scheduler runs in UTC)
-    yesterday = today - timedelta(days=1)
+    three_days_ago = today - timedelta(days=3)
     try:
         lad = date.fromisoformat(last_active_date)
-        return lad >= yesterday
+        return lad >= three_days_ago
     except Exception:
         return False
 
@@ -261,7 +263,107 @@ def _generate_content(job: dict) -> tuple[str, str]:
     if jtype == "nightly_revision":
         return _generate_nightly_revision(job)
 
+    if jtype == "fact_drill":
+        return _generate_fact_drill(job)
+
     return None, ""
+
+def _generate_daily_facts(topics: list) -> str:
+    """Returns a formatted 'Did You Know?' block or empty string on failure."""
+    from bot.llm import create_completion
+    import random
+    from bot.quiz import HCS_GS_TOPICS
+    if not topics:
+        topics = random.sample(HCS_GS_TOPICS, k=2)
+    try:
+        facts = create_completion(
+            messages=[{"role": "user", "content": DAILY_FACT_PROMPT.format(topics=", ".join(topics[:3]))}],
+            max_tokens=180,
+            temperature=0.9,
+        )
+        return f"*📌 Did You Know?*\n\n{facts.strip()}"
+    except Exception as e:
+        print(f"[scheduler] daily facts failed: {e}")
+        return ""
+
+
+def _generate_fact_drill(job: dict) -> tuple[str, str]:
+    """Every 2 hours (no time restriction): send one fact + one question on an adaptive topic.
+    Stores the question in quiz_sessions so user can reply A/B/C/D."""
+    import hashlib
+    import random
+
+    chat_id = job["chat_id"]
+    last_hash = job.get("last_content_hash")
+    seen_hashes = list(job.get("seen_keys") or [])
+
+    from bot.quiz import _get_adaptive_topic, _generate, _fmt, HCS_GS_TOPICS
+
+    # Pick topic adaptive to user's weak areas
+    try:
+        topic = _get_adaptive_topic(chat_id, "")
+    except Exception:
+        topic = random.choice(HCS_GS_TOPICS)
+
+    # Generate fact and question on the same topic
+    fact_block = _generate_daily_facts([topic])
+
+    try:
+        q = _generate(topic)
+    except Exception as e:
+        print(f"[scheduler] fact_drill question generation failed: {e}")
+        # Send just the fact if question fails
+        if not fact_block:
+            return None, ""
+        content = f"⏰ *Study Drill — {topic}*\n\n{fact_block}"
+        content_hash = hashlib.md5(content.encode()).hexdigest()
+        return (None if content_hash == last_hash else content), content_hash
+
+    content_hash = hashlib.md5(q["question"].encode()).hexdigest()
+    # Regenerate once if this question was recently seen
+    if content_hash in seen_hashes:
+        try:
+            q = _generate(topic)
+            content_hash = hashlib.md5(q["question"].encode()).hexdigest()
+        except Exception:
+            pass  # keep original if regeneration fails
+
+    # Only attach question if no active quiz or mock test
+    question_part = ""
+    try:
+        active_quiz = sb.table("quiz_sessions").select("id")\
+            .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
+        active_mock = sb.table("mock_tests").select("id")\
+            .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
+
+        if not active_quiz.data and not active_mock.data:
+            sb.table("quiz_sessions").upsert({
+                "chat_id": chat_id, "exam": "HCS", "subject": q.get("_topic", topic),
+                "question": q["question"], "options": q["options"],
+                "correct_answer": q["correct"], "explanation": q["explanation"],
+                "active": True, "score": 0, "total": 0,
+            }, on_conflict="chat_id").execute()
+            question_part = f"\n\nTest yourself 👇\n\n{_fmt(q)}"
+    except Exception as e:
+        print(f"[scheduler] fact_drill quiz_session store failed: {e}")
+
+    content = f"⏰ *2-Hour Drill — {topic}*\n\n{fact_block}{question_part}"
+
+    if content_hash == last_hash:
+        return None, last_hash
+
+    # Update seen_hashes: keep last 50 question hashes to avoid repeats
+    seen_hashes.append(content_hash)
+    if len(seen_hashes) > 50:
+        seen_hashes = seen_hashes[-50:]
+    try:
+        sb.table("scheduled_jobs").update({"seen_keys": seen_hashes})\
+            .eq("chat_id", job["chat_id"]).eq("job_type", "fact_drill").execute()
+    except Exception as e:
+        print(f"[scheduler] fact_drill seen_keys update failed: {e}")
+
+    return content, content_hash
+
 
 def _generate_nightly_revision(job: dict) -> tuple[str, str]:
     import hashlib
@@ -293,6 +395,9 @@ def _generate_nightly_revision(job: dict) -> tuple[str, str]:
         )[:3]
     except Exception:
         weak = []
+
+    # Build topic list for daily facts: weak topics first, then today's topics
+    fact_topics = [r["topic"] for r in weak] if weak else []
 
     # 3. Get streak
     try:
@@ -329,6 +434,13 @@ def _generate_nightly_revision(job: dict) -> tuple[str, str]:
         except Exception:
             today_summary = ""
 
+    # If no weak topics yet, try extracting from today's summary
+    if not fact_topics and today_summary:
+        import re as _re
+        m = _re.search(r"Topics:\s*\[([^\]]+)\]", today_summary)
+        if m:
+            fact_topics = [t.strip() for t in m.group(1).split(",") if t.strip()]
+
     # 5. Build the message
     from datetime import date
     date_str = date.today().strftime("%d %b %Y")
@@ -357,6 +469,10 @@ def _generate_nightly_revision(job: dict) -> tuple[str, str]:
         )
         parts.append(f"*⚠️ Weak areas to revise:*\n{weak_lines}")
 
+    facts_block = _generate_daily_facts(fact_topics)
+    if facts_block:
+        parts.append(facts_block)
+
     parts.append("_Reply *quiz me* to drill your weak topics, or *my progress* for full stats._")
 
     content = "\n\n".join(parts)
@@ -368,9 +484,25 @@ def _generate_nightly_revision(job: dict) -> tuple[str, str]:
     return content, content_hash
 
 NUDGE_MESSAGE = (
-    "📚 *Haven't studied today yet?*\n\n"
-    "Keep your streak alive! Try a quick quiz or mock test.\n"
-    "Reply *quiz me* to start, or *mock test* for a full practice session."
+    "📚 *Hey! Yudhister here — haven't seen you studying today.*\n\n"
+    "Even 10 minutes of practice makes a difference in the long run. "
+    "The students who crack HCS aren't necessarily the smartest — they're the most consistent.\n\n"
+    "Reply *quiz me* for a quick 5-question drill, or *hpsc mock* for a full practice session. "
+    "Let's keep that streak alive! 💪"
+)
+
+DAILY_FACT_PROMPT = (
+    "You are Yudhister, an HCS professor. Generate exactly 2 surprising, exam-relevant facts "
+    "from the following HCS syllabus topic(s): {topics}.\n\n"
+    "Rules:\n"
+    "- Each fact must be a memorable one-liner under 40 words\n"
+    "- Frame it as something a student will remember on exam day\n"
+    "- After each fact, add a short '(Why it matters: ...)' note in italics\n"
+    "- Use 'By the way —' to open the first fact, nothing before it\n"
+    "- No preamble like 'Here are' or 'Sure!'\n\n"
+    "Output format:\n"
+    "• By the way — [fact 1]. _(Why it matters: ...)_\n"
+    "• [fact 2]. _(Why it matters: ...)_"
 )
 
 async def _check_inactive_users():

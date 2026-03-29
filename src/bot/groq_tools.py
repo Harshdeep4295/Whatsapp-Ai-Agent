@@ -201,7 +201,30 @@ TOOL_SCHEMAS = [
                 }
             }
         }
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_and_summarise",
+            "description": (
+                "Search the web and return a summarised answer. Use this when the user asks to "
+                "search for something, look up recent information, 'update me on X', 'what's the latest on Y', "
+                "'find out about Z', or asks a factual question you cannot answer from memory. "
+                "DO NOT use for news/current affairs — use get_current_affairs for that. "
+                "DO NOT use for quiz or syllabus questions — use the appropriate quiz tool."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query exactly as the user phrased it."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
 ]
 
 

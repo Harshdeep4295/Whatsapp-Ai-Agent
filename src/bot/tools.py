@@ -14,6 +14,7 @@ async def execute_tool(name: str, inputs: dict, chat_id: str) -> str:
         "set_exam_date": _set_exam_date,
         "start_hpsc_mock": _start_hpsc_mock,
         "start_haryana_special": _start_haryana_special,
+        "search_and_summarise": _search_and_summarise,
     }
     fn = fns.get(name)
     if not fn:
@@ -249,3 +250,36 @@ async def _start_haryana_special(chat_id: str, question_count: int = 10) -> str:
         full = text
     await send_message(chat_id, full)
     return "Haryana special drill started. Content delivered to user."
+
+
+async def _search_and_summarise(chat_id: str, query: str) -> str:
+    from bot.web_search import search_web
+    from bot.llm import create_completion
+
+    search_query = query
+    lower = query.lower()
+    if "hcs" not in lower and "haryana" not in lower and len(query.split()) <= 6:
+        search_query = f"{query} HCS exam India"
+
+    results = search_web(search_query, max_results=4)
+    if not results:
+        return "Could not find results for that right now. Try again in a moment!"
+
+    snippets = "\n\n".join(
+        f"Source: {r.get('title', 'Untitled')}\n{r.get('body', '')[:300]}"
+        for r in results if r.get("title") or r.get("body")
+    )
+    if not snippets.strip():
+        return "Found results but couldn't extract content. Try rephrasing your query."
+
+    summary = create_completion(
+        messages=[{"role": "user", "content":
+            f"You are Yudhister, HCS exam coach. A student asked: \"{query}\"\n\n"
+            f"Using ONLY the information in these search results, give a clear answer in 3-5 bullet points. "
+            f"If a point is relevant for HCS exam, add '(HCS tip: ...)' after it. "
+            f"Do NOT add facts not in the sources.\n\nSearch results:\n{snippets}"
+        }],
+        max_tokens=350,
+        temperature=0.6,
+    )
+    return f"*Search: {query}*\n\n{summary.strip()}"

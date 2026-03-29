@@ -79,7 +79,7 @@ The question must:
 - For GS topics: test factual + analytical knowledge about India/Haryana
 
 Return ONLY valid JSON, nothing else:
-{{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"one clear sentence explaining why"}}"""
+{{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"2-3 sentences: why the correct answer is right, the key concept a student must remember, and why wrong options are traps"}}"""
 
 MCQ_STMT_PROMPT = """Generate ONE HCS (Haryana Civil Services) Prelims exam style statement-correctness question strictly on this topic: {subject}
 
@@ -96,7 +96,7 @@ The statements must:
 - Match actual HPSC GS paper difficulty and style
 
 Return ONLY valid JSON, nothing else:
-{{"question":"Consider the following statements about [specific aspect]:\\n1. [statement]\\n2. [statement]\\n3. [statement]\\n\\nHow many of the above statements are correct?","options":{{"A":"None","B":"Only one","C":"Only two","D":"All three"}},"correct":"B","explanation":"Only statement 2 is correct because..."}}"""
+{{"question":"Consider the following statements about [specific aspect]:\\n1. [statement]\\n2. [statement]\\n3. [statement]\\n\\nHow many of the above statements are correct?","options":{{"A":"None","B":"Only one","C":"Only two","D":"All three"}},"correct":"B","explanation":"[2-3 sentences: which statements are correct and why, the core concept, and a memory tip]"}}"""
 
 MCQ_AR_PROMPT = """Generate ONE HCS (Haryana Civil Services) Prelims exam style assertion-reason question strictly on this topic: {subject}
 
@@ -116,7 +116,7 @@ The assertion and reason must:
 - Match actual HPSC GS paper style
 
 Return ONLY valid JSON, nothing else:
-{{"question":"Assertion (A): [assertion text]\\nReason (R): [reason text]","options":{{"A":"Both A and R are true, and R correctly explains A","B":"Both A and R are true, but R does NOT correctly explain A","C":"A is false, but R is true","D":"A is true, but R is false"}},"correct":"C","explanation":"[explanation of which parts are true/false and why]"}}"""
+{{"question":"Assertion (A): [assertion text]\\nReason (R): [reason text]","options":{{"A":"Both A and R are true, and R correctly explains A","B":"Both A and R are true, but R does NOT correctly explain A","C":"A is false, but R is true","D":"A is true, but R is false"}},"correct":"C","explanation":"[2-3 sentences: what is true/false in A and R, the underlying concept, and why this combination is a classic exam trap]"}}"""
 
 MCQ_MATCH_PROMPT = """Generate ONE HCS (Haryana Civil Services) Prelims exam style match-list question strictly on this topic: {subject}
 
@@ -134,7 +134,7 @@ Match pairs must:
 - Match actual HPSC GS paper difficulty
 
 Return ONLY valid JSON, nothing else:
-{{"question":"Match List I with List II:\\n\\nList I\\n(a) [item1]\\n(b) [item2]\\n(c) [item3]\\n(d) [item4]\\n\\nList II\\n(i) [match1]\\n(ii) [match2]\\n(iii) [match3]\\n(iv) [match4]\\n\\nSelect the correct answer using the codes below:","options":{{"A":"a-i, b-ii, c-iii, d-iv","B":"a-ii, b-i, c-iv, d-iii","C":"a-iii, b-iv, c-i, d-ii","D":"a-iv, b-iii, c-ii, d-i"}},"correct":"B","explanation":"[brief explanation of the correct matching]"}}"""
+{{"question":"Match List I with List II:\\n\\nList I\\n(a) [item1]\\n(b) [item2]\\n(c) [item3]\\n(d) [item4]\\n\\nList II\\n(i) [match1]\\n(ii) [match2]\\n(iii) [match3]\\n(iv) [match4]\\n\\nSelect the correct answer using the codes below:","options":{{"A":"a-i, b-ii, c-iii, d-iv","B":"a-ii, b-i, c-iv, d-iii","C":"a-iii, b-iv, c-i, d-ii","D":"a-iv, b-iii, c-ii, d-i"}},"correct":"B","explanation":"[2-3 sentences: the correct matches and why, plus one fact that helps remember the pairing]"}}"""
 
 MOCK_TEST_PROMPT = """Generate exactly {n} HCS (Haryana Civil Services) Prelims style MCQs {topic_constraint}.
 
@@ -304,6 +304,7 @@ def _mock_report(questions: list, answers: list, n: int) -> str:
     pct = int(correct_count / n * 100)
 
     topic_stats: dict = {}
+    wrong_qs = []
     for a in answers:
         t = a.get("topic", "General")
         if t not in topic_stats:
@@ -311,19 +312,36 @@ def _mock_report(questions: list, answers: list, n: int) -> str:
         topic_stats[t]["total"] += 1
         if a["correct"]:
             topic_stats[t]["correct"] += 1
+        else:
+            idx = a["q"]
+            if idx < len(questions):
+                wrong_qs.append((idx + 1, questions[idx]))
 
-    report = f"*Mock Test Complete!* 🏁\n\nScore: *{correct_count}/{n}* ({pct}%)\n\n"
+    if pct >= 80:
+        verdict = "Excellent work! 🔥 You're exam-ready on these topics."
+    elif pct >= 60:
+        verdict = "Good attempt! 💪 A bit more revision on the weak areas and you're there."
+    elif pct >= 40:
+        verdict = "Keep pushing! 📚 Focus on the topics below — they're costing you marks."
+    else:
+        verdict = "Don't be discouraged — every wrong answer shows you exactly what to study next. 💪"
+
+    report = f"*Mock Test Complete!* 🏁\n\nScore: *{correct_count}/{n}* ({pct}%)\n\n{verdict}\n\n"
 
     weak = [t for t, s in topic_stats.items() if s["total"] > 0 and s["correct"] / s["total"] < 0.6]
     if weak:
-        report += f"*Revise these topics:* {', '.join(weak)}\n\n"
+        report += f"*Topics to revise:* {', '.join(weak)}\n\n"
 
-    if pct >= 80:
-        report += "Excellent work! 🔥 Keep it up!"
-    elif pct >= 50:
-        report += "Good attempt! 💪 Focus on your weak topics."
-    else:
-        report += "Keep practicing! 📚 Review the topics above and try again."
+    # Show up to 4 wrong answers with their concept explanation
+    if wrong_qs:
+        report += "*Questions to review:*\n"
+        for q_num, q in wrong_qs[:4]:
+            short_q = q.get("question", "")[:80].split("\n")[0]
+            explanation = q.get("explanation", "")
+            correct_letter = q.get("correct", "")
+            correct_text = q.get("options", {}).get(correct_letter, "")
+            report += f"\n*Q{q_num}* {short_q}…\n✅ {correct_letter}: {correct_text}\n💡 {explanation}\n"
+
     return report
 
 
@@ -371,10 +389,13 @@ def check_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]:
 
     if is_right:
         result = f"*Correct!* 🎉\n\n{s['explanation']}"
+        result += f"\n\n_Score: {new_score}/{new_total}_ · Next one 👇"
     else:
-        result = f"*Not quite.* The answer is *{correct}*: {s['options'][correct]}\n\n{s['explanation']}"
-
-    result += f"\n\nScore: *{new_score}/{new_total}*\n\nNext one 👇"
+        result = (
+            f"*Not quite — the answer is {correct}.* {s['options'][correct]}\n\n"
+            f"💡 *Concept:* {s['explanation']}\n\n"
+            f"_Score: {new_score}/{new_total}_ · Next one 👇"
+        )
 
     next_topic = _get_adaptive_topic(chat_id, "")
     next_q = _generate(next_topic)
@@ -427,7 +448,11 @@ def start_batch_quiz(chat_id: str, n: int = 5, topic: str = None) -> tuple[str, 
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
-    questions = json.loads(raw.strip())
+    try:
+        questions = json.loads(raw.strip())
+    except Exception as e:
+        print(f"[quiz] start_batch_quiz json parse failed: {e}")
+        return "Sorry, I had trouble generating that quiz. Please try again!", None
 
     # Deactivate any existing mock test
     sb.table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
@@ -453,25 +478,45 @@ def start_batch_quiz(chat_id: str, n: int = 5, topic: str = None) -> tuple[str, 
 
 # ── Mock Test ────────────────────────────────────────────────────────────────
 
-def start_mock_test(chat_id: str, n: int = 10, topic: str = None) -> str:
+def start_mock_test(chat_id: str, n: int = 10, topic: str = None) -> tuple[str, dict]:
     if topic:
         topic_constraint = f"strictly on the topic: {topic}"
     else:
         all_topics = HCS_GS_TOPICS + HCS_CSAT_TOPICS
         topics_str = ", ".join(all_topics)
         topic_constraint = f"across different topics from this list: {topics_str}"
-    raw = create_completion(
-        messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(n=n, topic_constraint=topic_constraint)}],
-        max_tokens=n * 220,
-        temperature=0.85,
-    )
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    questions = json.loads(raw.strip())
 
-    # Deactivate any existing mock test
+    questions = []
+    try:
+        raw = create_completion(
+            messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(n=n, topic_constraint=topic_constraint)}],
+            max_tokens=n * 220,
+            temperature=0.85,
+        )
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        questions = json.loads(raw.strip())
+    except Exception as e:
+        print(f"[quiz] start_mock_test batch failed: {e} — falling back to single-question generation")
+
+    # Fallback: generate questions one by one if batch failed or returned too few
+    if len(questions) < n:
+        all_topics = HCS_GS_TOPICS + HCS_CSAT_TOPICS
+        while len(questions) < n:
+            try:
+                t = random.choice(all_topics)
+                q = _generate(t)
+                q["topic"] = q.get("_topic", t)
+                questions.append(q)
+            except Exception:
+                break
+
+    if not questions:
+        return "Sorry, couldn't generate the mock test right now. Please try again in a moment!", None
+
+    questions = questions[:n]
     sb.table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
     sb.table("mock_tests").insert({
         "chat_id": chat_id,
@@ -520,9 +565,12 @@ def check_mock_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]
     )
 
     if is_right:
-        feedback = f"*Correct!* ✅\n{q['explanation']}"
+        feedback = f"*Correct!* ✅\n\n{q['explanation']}"
     else:
-        feedback = f"*Wrong.* Answer: *{correct}*: {q['options'][correct]}\n{q['explanation']}"
+        feedback = (
+            f"*Not quite — answer is {correct}.* {q['options'][correct]}\n\n"
+            f"💡 *Concept:* {q['explanation']}"
+        )
 
     next_idx = idx + 1
 
@@ -587,20 +635,33 @@ def start_hpsc_mock(chat_id: str, n: int = 25) -> tuple[str, dict]:
         batch_parts = [f"{c}q on '{t}'" for t, c in batch_counts.most_common()]
         batch_constraint = "with EXACTLY this topic distribution: " + ", ".join(batch_parts)
         batch_n = len(batch_topics)
-        raw = create_completion(
-            messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(
-                n=batch_n, topic_constraint=batch_constraint
-            )}],
-            max_tokens=batch_n * 220,
-            temperature=0.85,
-        )
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        batch_questions = json.loads(raw.strip())
-        all_questions.extend(batch_questions)
+        try:
+            raw = create_completion(
+                messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(
+                    n=batch_n, topic_constraint=batch_constraint
+                )}],
+                max_tokens=batch_n * 220,
+                temperature=0.85,
+            )
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            batch_questions = json.loads(raw.strip())
+            all_questions.extend(batch_questions)
+        except Exception as e:
+            print(f"[quiz] hpsc_mock batch {i}-{i+batch_size} failed: {e} — falling back to _generate()")
+            for t in batch_topics:
+                try:
+                    q = _generate(t)
+                    q["topic"] = q.get("_topic", t)
+                    all_questions.append(q)
+                except Exception:
+                    pass
         i += batch_size
+
+    if not all_questions:
+        return "Sorry, couldn't generate the mock test right now. Please try again in a moment!", None
 
     questions = all_questions[:n]  # trim to exactly n in case of LLM overcounting
 
