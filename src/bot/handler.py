@@ -145,6 +145,22 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             or bool(_re.search(r'\bq\d+[\.\s]', t))
         )
 
+    # --- HPSC blueprint mock trigger ---
+    hpsc_mock_triggers = {"hpsc mock", "blueprint mock", "full mock test", "paper 1 mock", "100 question mock", "hpsc full mock"}
+    if any(t in lower for t in hpsc_mock_triggers):
+        from bot.quiz import start_hpsc_mock
+        text_part, q_data = start_hpsc_mock(chat_id, n=25)
+        await _quiz_reply(chat_id, text_part, q_data)
+        return None
+
+    # --- Haryana special drill trigger ---
+    haryana_triggers = {"haryana special", "haryana quiz", "haryana drill", "haryana only", "haryana culture quiz"}
+    if any(t in lower for t in haryana_triggers):
+        from bot.quiz import start_haryana_special
+        text_part, q_data = start_haryana_special(chat_id, n=10)
+        await _quiz_reply(chat_id, text_part, q_data)
+        return None
+
     # --- Active mock test intercept ---
     if has_active_mock_test(chat_id):
         if lower in STOP_PHRASES:

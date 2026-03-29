@@ -169,6 +169,39 @@ TOOL_SCHEMAS = [
             }
         }
     }
+    ,
+    {
+        "type": "function",
+        "function": {
+            "name": "start_hpsc_mock",
+            "description": "Start a full HPSC blueprint mock test with questions distributed exactly like the real exam paper (History ~22%, Science ~20%, Polity ~15%, Geography ~11%, etc.). Use when user says 'hpsc mock', 'blueprint mock', 'full mock test', '100 question mock', 'paper 1 mock', or asks for a mock that mimics the real exam distribution.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question_count": {
+                        "type": "integer",
+                        "description": "Number of questions (default 25, max 50). Scales blueprint proportionally."
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_haryana_special",
+            "description": "Start a Haryana-only drill covering folk culture (Bhumia, Ghethi), heritage sites, 1857 regional leaders (Rao Tularam, Dhanu Singh), Haryana geography, schemes, and personalities. These are the cutoff-deciding questions absent from national resources. Use when user says 'haryana special', 'haryana quiz', 'haryana drill', 'haryana only', 'haryana culture quiz', or anything about specifically drilling Haryana content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question_count": {
+                        "type": "integer",
+                        "description": "Number of questions (default 10, max 20)."
+                    }
+                }
+            }
+        }
+    }
 ]
 
 

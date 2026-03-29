@@ -12,6 +12,8 @@ async def execute_tool(name: str, inputs: dict, chat_id: str) -> str:
         "cancel_scheduled_updates": _cancel_scheduled_updates,
         "get_wrong_answers": _get_wrong_answers,
         "set_exam_date": _set_exam_date,
+        "start_hpsc_mock": _start_hpsc_mock,
+        "start_haryana_special": _start_haryana_special,
     }
     fn = fns.get(name)
     if not fn:
@@ -215,3 +217,35 @@ async def _set_exam_date(chat_id: str, exam_date: str) -> str:
     if days == 0:
         return "Exam date set — that's TODAY! All the best! 🎯"
     return f"Exam date set to {exam_date}. *{days} days to go!* Let's make them count. 💪"
+
+
+async def _start_hpsc_mock(chat_id: str, question_count: int = 25) -> str:
+    from bot.quiz import start_hpsc_mock
+    from bot.whatsapp import send_message
+    n = min(max(question_count, 5), 50)
+    text, q_data = start_hpsc_mock(chat_id, n=n)
+    if q_data:
+        topic_name = q_data.get("topic", "")
+        topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
+        opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
+        full = text + "\n\n" + f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
+    else:
+        full = text
+    await send_message(chat_id, full)
+    return "HPSC blueprint mock started. Content delivered to user."
+
+
+async def _start_haryana_special(chat_id: str, question_count: int = 10) -> str:
+    from bot.quiz import start_haryana_special
+    from bot.whatsapp import send_message
+    n = min(max(question_count, 5), 20)
+    text, q_data = start_haryana_special(chat_id, n=n)
+    if q_data:
+        topic_name = q_data.get("topic", "")
+        topic_line = f"_Topic: {topic_name}_\n\n" if topic_name else ""
+        opts = "\n".join(f"*{k}.* {v}" for k, v in q_data["options"].items())
+        full = text + "\n\n" + f"{topic_line}{q_data['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
+    else:
+        full = text
+    await send_message(chat_id, full)
+    return "Haryana special drill started. Content delivered to user."

@@ -34,15 +34,40 @@ HCS_GS_TOPICS = [
 ]
 
 HCS_CSAT_TOPICS = [
-    "Reading Comprehension",
-    "Logical Reasoning",
-    "Analytical Ability",
-    "Data Interpretation",
-    "Basic Numeracy",
-    "Decision Making",
-    "Problem Solving",
-    "English Language Comprehension",
+    "Blood Relations (coded family trees, generation-based reasoning)",
+    "Number Coding (3-digit code language, symbol substitution)",
+    "Complex Arrangement (families, ordering, seating, classification)",
+    "Reading Comprehension (passage-based inference and vocabulary)",
+    "Basic Numeracy (percentages, ratios, averages, profit-loss)",
+    "Data Interpretation (tables, bar charts, pie charts)",
+    "Logical Reasoning (syllogisms, analogies, series completion)",
+    "Decision Making and Problem Solving",
 ]
+
+HARYANA_SPECIAL_TOPICS = [
+    "Haryana folk culture and traditions (Bhumia/Khera village deity, Ghethi/Laggar/Basan/Nohra folk vocabulary)",
+    "Haryana heritage sites (Aram-i-Kausar Narnaul, Bhai ki Baoli Meham, Tomb of Sheikh Tayyab Kaithal)",
+    "1857 Revolution leaders in Haryana (Rao Tularam in Ahirwal, Dhanu Singh in Faridabad, Imam Ali Qalandar in Hansi)",
+    "Haryana geography — rivers, districts, dams, KMP Expressway, mountain passes",
+    "Haryana government schemes 2024-25 (agriculture welfare, women empowerment, education)",
+    "Haryana economy and agriculture — cotton farming crisis, GSDP growth, irrigation networks",
+    "Medieval history of Haryana — Mughal period, Sultanate connections, local chieftains",
+    "Haryana environment — Aravalli Green Wall project, forest cover data, water conservation",
+    "Haryana art, festivals, prominent personalities and awards 2024-25",
+]
+
+HPSC_GS_BLUEPRINT = {
+    "Indian History and Culture":     22,
+    "Indian Polity and Constitution": 18,
+    "General Science":                18,
+    "Indian Geography":               15,
+    "Indian Economy and Development": 12,
+    "Haryana History and Culture":     4,
+    "Science and Technology":          4,
+    "Important Government Schemes":    3,
+    "Haryana Geography":               2,
+    "Art and Culture":                 2,
+}  # Counts from actual 2023 HPSC GS paper — sum = 100
 
 MCQ_PROMPT = """Generate ONE HCS (Haryana Civil Services) Prelims exam style MCQ strictly on this topic: {subject}
 
@@ -55,6 +80,61 @@ The question must:
 
 Return ONLY valid JSON, nothing else:
 {{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"one clear sentence explaining why"}}"""
+
+MCQ_STMT_PROMPT = """Generate ONE HCS (Haryana Civil Services) Prelims exam style statement-correctness question strictly on this topic: {subject}
+
+Format EXACTLY like real HPSC questions:
+- Start with "Consider the following statements about [topic]:"
+- Give exactly 3 numbered statements
+- End with "How many of the above statements are correct?"
+- Options MUST always be exactly: A) None  B) Only one  C) Only two  D) All three
+
+The statements must:
+- Mix correct and incorrect facts (avoid making all 3 correct or all 3 wrong)
+- Test precise factual knowledge — dates, distinctions, locations, conditions
+- Include plausible incorrect statements that common misconceptions produce
+- Match actual HPSC GS paper difficulty and style
+
+Return ONLY valid JSON, nothing else:
+{{"question":"Consider the following statements about [specific aspect]:\\n1. [statement]\\n2. [statement]\\n3. [statement]\\n\\nHow many of the above statements are correct?","options":{{"A":"None","B":"Only one","C":"Only two","D":"All three"}},"correct":"B","explanation":"Only statement 2 is correct because..."}}"""
+
+MCQ_AR_PROMPT = """Generate ONE HCS (Haryana Civil Services) Prelims exam style assertion-reason question strictly on this topic: {subject}
+
+Format EXACTLY like real HPSC questions:
+- Assertion (A): [a factual statement about the topic]
+- Reason (R): [a statement that may or may not correctly explain the assertion]
+- Options MUST always be exactly:
+  A) Both A and R are true, and R correctly explains A
+  B) Both A and R are true, but R does NOT correctly explain A
+  C) A is false, but R is true
+  D) A is true, but R is false
+
+The assertion and reason must:
+- Test analytical thinking, not just recall
+- Use common exam misconceptions as traps (e.g. A is true but the given reason is wrong)
+- Be grounded in actual HCS/UPSC-level facts
+- Match actual HPSC GS paper style
+
+Return ONLY valid JSON, nothing else:
+{{"question":"Assertion (A): [assertion text]\\nReason (R): [reason text]","options":{{"A":"Both A and R are true, and R correctly explains A","B":"Both A and R are true, but R does NOT correctly explain A","C":"A is false, but R is true","D":"A is true, but R is false"}},"correct":"C","explanation":"[explanation of which parts are true/false and why]"}}"""
+
+MCQ_MATCH_PROMPT = """Generate ONE HCS (Haryana Civil Services) Prelims exam style match-list question strictly on this topic: {subject}
+
+Format EXACTLY like real HPSC questions:
+- "Match List I with List II:"
+- List I: 4 items labeled (a), (b), (c), (d)
+- List II: 4 items labeled (i), (ii), (iii), (iv)
+- "Select the correct answer using the codes below:"
+- Options MUST use letter-number pair format
+
+Match pairs must:
+- Cover named entities (rulers→capitals, acts→years, rivers→states, scientists→discoveries)
+- Have exactly one correct complete matching
+- Use plausible wrong pairings as distractors
+- Match actual HPSC GS paper difficulty
+
+Return ONLY valid JSON, nothing else:
+{{"question":"Match List I with List II:\\n\\nList I\\n(a) [item1]\\n(b) [item2]\\n(c) [item3]\\n(d) [item4]\\n\\nList II\\n(i) [match1]\\n(ii) [match2]\\n(iii) [match3]\\n(iv) [match4]\\n\\nSelect the correct answer using the codes below:","options":{{"A":"a-i, b-ii, c-iii, d-iv","B":"a-ii, b-i, c-iv, d-iii","C":"a-iii, b-iv, c-i, d-ii","D":"a-iv, b-iii, c-ii, d-i"}},"correct":"B","explanation":"[brief explanation of the correct matching]"}}"""
 
 MOCK_TEST_PROMPT = """Generate exactly {n} HCS (Haryana Civil Services) Prelims style MCQs {topic_constraint}.
 
@@ -182,8 +262,24 @@ def _update_progress(
 
 def _generate(subject: str) -> dict:
     topic = subject
+    # CSAT/aptitude topics need simple MCQ format, not GS recall formats
+    csat_topic = any(
+        kw in subject.lower()
+        for kw in ["comprehension", "reasoning", "numeracy", "interpretation",
+                   "decision", "aptitude", "blood relation", "coding", "arrangement",
+                   "problem solving", "data"]
+    )
+    r = random.random()
+    if csat_topic:
+        prompt = MCQ_PROMPT          # simple MCQ for aptitude/reasoning
+    elif r < 0.55:
+        prompt = MCQ_STMT_PROMPT     # ~55% statement-correctness
+    elif r < 0.90:
+        prompt = MCQ_MATCH_PROMPT    # ~35% match-list (mirrors real GS paper)
+    else:
+        prompt = MCQ_AR_PROMPT       # ~10% assertion-reason
     raw = create_completion(
-        messages=[{"role": "user", "content": MCQ_PROMPT.format(subject=topic)}],
+        messages=[{"role": "user", "content": prompt.format(subject=topic)}],
         max_tokens=400,
         temperature=0.85,
     )
@@ -450,6 +546,120 @@ def has_active_mock_test(chat_id: str) -> bool:
     res = sb.table("mock_tests").select("id")\
         .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
     return bool(res.data)
+
+
+def _scale_blueprint(n: int) -> list:
+    """Return a list of n topic strings following HPSC paper blueprint proportions."""
+    total_weight = sum(HPSC_GS_BLUEPRINT.values())
+    result = []
+    remainders = []
+    for topic, weight in HPSC_GS_BLUEPRINT.items():
+        exact = n * weight / total_weight
+        floor_count = int(exact)
+        result.extend([topic] * floor_count)
+        remainders.append((exact - floor_count, topic))
+    # Fill remaining slots by largest fractional remainder
+    shortage = n - len(result)
+    remainders.sort(key=lambda x: -x[0])
+    for i in range(shortage):
+        result.append(remainders[i][1])
+    return result
+
+
+def start_hpsc_mock(chat_id: str, n: int = 25) -> tuple[str, dict]:
+    """Start a blueprint-weighted HPSC mock test.
+    Generates n questions following the real HPSC paper topic distribution."""
+    topic_list = _scale_blueprint(n)
+
+    # Build topic constraint string for the LLM showing required distribution
+    from collections import Counter
+    counts = Counter(topic_list)
+    parts = [f"{count}q on '{topic}'" for topic, count in counts.most_common()]
+    topic_constraint = "with EXACTLY this topic distribution: " + ", ".join(parts)
+
+    # Generate in batches of 10 for reliability
+    batch_size = 10
+    all_questions = []
+    i = 0
+    while i < len(topic_list):
+        batch_topics = topic_list[i:i+batch_size]
+        batch_counts = Counter(batch_topics)
+        batch_parts = [f"{c}q on '{t}'" for t, c in batch_counts.most_common()]
+        batch_constraint = "with EXACTLY this topic distribution: " + ", ".join(batch_parts)
+        batch_n = len(batch_topics)
+        raw = create_completion(
+            messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(
+                n=batch_n, topic_constraint=batch_constraint
+            )}],
+            max_tokens=batch_n * 220,
+            temperature=0.85,
+        )
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        batch_questions = json.loads(raw.strip())
+        all_questions.extend(batch_questions)
+        i += batch_size
+
+    questions = all_questions[:n]  # trim to exactly n in case of LLM overcounting
+
+    sb.table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
+    sb.table("mock_tests").insert({
+        "chat_id": chat_id,
+        "questions": questions,
+        "answers": [],
+        "current_idx": 0,
+        "active": True,
+    }).execute()
+
+    q = questions[0]
+    return (
+        f"*HPSC Blueprint Mock — {n} Questions* 📝\n_Topics match real exam distribution_\n\nQuestion 1/{n}:",
+        {"question": q["question"], "options": q["options"], "topic": q.get("topic", "")},
+    )
+
+
+def has_active_hpsc_mock(chat_id: str) -> bool:
+    # Reuses the same mock_tests table — just delegates to has_active_mock_test
+    return has_active_mock_test(chat_id)
+
+
+def start_haryana_special(chat_id: str, n: int = 10) -> tuple[str, dict]:
+    """Start a Haryana-only quiz covering folk culture, heritage, 1857 leaders, geography etc.
+    These are the differentiator topics that decide exam cutoffs."""
+    # Build topic list cycling through HARYANA_SPECIAL_TOPICS
+    topic_list = [HARYANA_SPECIAL_TOPICS[i % len(HARYANA_SPECIAL_TOPICS)] for i in range(n)]
+    random.shuffle(topic_list)
+
+    topic_constraint = f"strictly on Haryana-specific topics — rotate across these sub-topics: {', '.join(HARYANA_SPECIAL_TOPICS)}"
+    raw = create_completion(
+        messages=[{"role": "user", "content": MOCK_TEST_PROMPT.format(
+            n=n, topic_constraint=topic_constraint
+        )}],
+        max_tokens=n * 220,
+        temperature=0.85,
+    )
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    questions = json.loads(raw.strip())
+
+    sb.table("mock_tests").update({"active": False}).eq("chat_id", chat_id).execute()
+    sb.table("mock_tests").insert({
+        "chat_id": chat_id,
+        "questions": questions,
+        "answers": [],
+        "current_idx": 0,
+        "active": True,
+    }).execute()
+
+    q = questions[0]
+    return (
+        f"*Haryana Special Drill — {n} Questions* 🏛️\n_Folk culture, heritage sites, 1857 leaders, geography — the cutoff deciders_\n\nQuestion 1/{n}:",
+        {"question": q["question"], "options": q["options"], "topic": q.get("topic", "Haryana")},
+    )
 
 
 # ── Study Session ────────────────────────────────────────────────────────────
