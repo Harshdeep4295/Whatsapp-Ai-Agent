@@ -261,6 +261,35 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         save_message(chat_id, "assistant", reply)
         return reply
 
+    # --- "Got it" → quiz on the last sent fact topic ---
+    got_it_triggers = {"got it", "gotit", "got it!", "ready", "test me", "test me on this",
+                       "quiz me on this", "send question", "yes test me", "ok test me", "i got it"}
+    if any(t in lower for t in got_it_triggers):
+        from bot.supabase_client import get_sb as _gsb
+        from bot.quiz import _generate
+        try:
+            job_res = _gsb().table("scheduled_jobs")\
+                .select("subject")\
+                .eq("chat_id", chat_id).eq("job_type", "fact_drill").eq("active", True)\
+                .limit(1).execute()
+            topic = (job_res.data[0].get("subject") or "") if job_res.data else ""
+            if not topic:
+                from bot.quiz import _get_adaptive_topic
+                topic = _get_adaptive_topic(chat_id, "")
+            q = _generate(topic)
+            q_data = {"question": q["question"], "options": q["options"], "topic": q.get("_topic", topic)}
+            _gsb().table("quiz_sessions").upsert({
+                "chat_id": chat_id, "exam": "DRILL", "subject": topic,
+                "question": q["question"], "options": q["options"],
+                "correct_answer": q["correct"], "explanation": q["explanation"],
+                "active": True, "score": 0, "total": 0,
+            }, on_conflict="chat_id").execute()
+            await _quiz_reply(chat_id, f"Here's your question on *{topic}* 🎯", q_data)
+        except Exception as e:
+            print(f"[handler] got_it quiz failed: {e}")
+            await send_message(chat_id, "Couldn't load a question right now — try *drill me* instead!")
+        return None
+
     # --- HPSC blueprint mock trigger ---
     # --- On-demand fact drill trigger ---
     drill_triggers = {"drill me", "fact drill", "2 hour drill", "daily drill", "give me a drill"}

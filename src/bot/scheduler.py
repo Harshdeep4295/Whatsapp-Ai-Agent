@@ -335,11 +335,15 @@ def _generate_fact_drill(job: dict) -> tuple[str, str]:
         except Exception:
             return None, last_hash or ""
 
+    # Prompt user to confirm they've read it — reply triggers a quiz question
+    content += "\n\n_Read it? Reply *got it* and I'll test you on this! 💪_"
+
     seen_hashes.append(content_hash)
     if len(seen_hashes) > 50:
         seen_hashes = seen_hashes[-50:]
     try:
-        sb.table("scheduled_jobs").update({"seen_keys": seen_hashes})\
+        # Store the topic so handler can generate a matching quiz when user replies
+        sb.table("scheduled_jobs").update({"seen_keys": seen_hashes, "subject": topic})\
             .eq("chat_id", job["chat_id"]).eq("job_type", "fact_drill").execute()
     except Exception as e:
         print(f"[scheduler] fact_drill seen_keys update failed: {e}")
