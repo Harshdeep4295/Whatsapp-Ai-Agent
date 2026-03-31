@@ -27,6 +27,9 @@ JOB_TYPES = {
     "night": "nightly_revision",
     "revision": "nightly_revision",
     "daily revision": "nightly_revision",
+    "morning_kickoff": "morning_kickoff",
+    "morning": "morning_kickoff",
+    "kickoff": "morning_kickoff",
 }
 
 INTERVAL_ALIASES = {
@@ -58,6 +61,15 @@ def _next_1630_utc() -> datetime:
     """Return the next occurrence of 16:30 UTC (10 PM IST) from now."""
     now = datetime.now(timezone.utc)
     target = now.replace(hour=16, minute=30, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target
+
+
+def _next_0330_utc() -> datetime:
+    """Return the next occurrence of 03:30 UTC (9 AM IST) from now."""
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=3, minute=30, second=0, microsecond=0)
     if target <= now:
         target += timedelta(days=1)
     return target
@@ -266,6 +278,9 @@ def _generate_content(job: dict) -> tuple[str, str]:
     if jtype == "fact_drill":
         return _generate_fact_drill(job)
 
+    if jtype == "morning_kickoff":
+        return _generate_morning_kickoff(job)
+
     return None, ""
 
 def _generate_daily_facts(topics: list) -> str:
@@ -348,6 +363,51 @@ def _generate_fact_drill(job: dict) -> tuple[str, str]:
     except Exception as e:
         print(f"[scheduler] fact_drill seen_keys update failed: {e}")
 
+    return content, content_hash
+
+
+def _generate_morning_kickoff(job: dict) -> tuple[str, str]:
+    """Daily 9 AM IST: personalized study plan based on weak topics."""
+    import hashlib
+    from datetime import date
+    chat_id = job["chat_id"]
+
+    try:
+        res = sb.table("user_progress").select("topic,correct,total")\
+            .eq("chat_id", chat_id).execute()
+        rows = [r for r in (res.data or []) if r["total"] >= 3]
+        rows.sort(key=lambda r: r["correct"] / r["total"])
+    except Exception:
+        rows = []
+
+    lines = []
+    for i, r in enumerate(rows[:2], 1):
+        pct = int(r["correct"] / r["total"] * 100)
+        if pct < 50:
+            label = "your weakest"
+        elif pct < 70:
+            label = "improving"
+        else:
+            label = "getting strong"
+        lines.append(f"{i}. {r['topic']} ({label} — {pct}%)")
+
+    if not lines:
+        from bot.quiz import HCS_GS_TOPICS
+        import random
+        picks = random.sample(HCS_GS_TOPICS, k=2)
+        lines = [f"1. {picks[0]}", f"2. {picks[1]}"]
+
+    lines.append(f"{len(lines) + 1}. 5 quick MCQs")
+
+    content = (
+        f"Good morning! Today's focus 🎯\n\n"
+        + "\n".join(lines)
+        + "\n\nReply:\n"
+        "▶️ *START* — begin now\n"
+        "⏭ *SKIP* — skip today\n"
+        "💪 *HARD* — give me harder questions"
+    )
+    content_hash = hashlib.md5((content + date.today().isoformat()).encode()).hexdigest()
     return content, content_hash
 
 
@@ -460,6 +520,7 @@ def _generate_nightly_revision(job: dict) -> tuple[str, str]:
         parts.append(facts_block)
 
     parts.append("_Reply *quiz me* to drill your weak topics, or *my progress* for full stats._")
+    parts.append("How's the difficulty?\n1. Too Easy\n2. Just Right\n3. Too Hard")
 
     content = "\n\n".join(parts)
     content_hash = hashlib.md5(content.encode()).hexdigest()

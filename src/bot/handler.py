@@ -10,6 +10,7 @@ from bot.quiz import (
     has_active_mock_test, check_mock_answer,
     has_active_study_session, check_study_answer,
     has_active_passage_quiz, check_passage_answer,
+    _is_conf_waiting, record_confidence,
 )
 from bot.whatsapp import send_message
 
@@ -18,6 +19,7 @@ WELCOME_MSG = (
     "Here's everything I can do for you:\n\n"
     "*📝 Practice & Tests*\n"
     "• *quiz me* — adaptive questions on your weak topics\n"
+    "• *rapid fire* — 5 questions, no pause, maximum pressure ⚡\n"
     "• *hpsc mock* — 25-question blueprint mock (real exam format)\n"
     "• *haryana special* — Haryana-only drill (folk culture, 1857, geography)\n"
     "• *mock test* — quick 10-question test on any topic\n\n"
@@ -31,7 +33,9 @@ WELCOME_MSG = (
     "• *my progress* — see your topic-wise accuracy\n"
     "• *wrong answers* — review your mistakes\n"
     "• *set exam date [date]* — I'll track your countdown\n\n"
-    "I also send you a *2-hour drill* automatically — a fact + question every 2 hours to keep you sharp.\n\n"
+    "I'll also send you:\n"
+    "• A *morning kickoff* at 9 AM with your daily focus plan\n"
+    "• A *fact drill* every 2 hours to keep your memory sharp\n\n"
     "What do you want to start with? 🎯"
 )
 
@@ -56,12 +60,45 @@ async def _quiz_reply(chat_id: str, text: str, q_data: dict | None) -> None:
 
 
 def _get_drill_session(chat_id: str) -> bool:
-    """Return True if the active quiz_session is tagged as a DRILL (not a regular quiz)."""
+    """Return True if the active quiz_session is a DRILL (including CONF/ERR states)."""
     try:
         from bot.supabase_client import get_sb
         res = get_sb().table("quiz_sessions").select("exam")\
             .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
-        return bool(res.data and res.data[0].get("exam") == "DRILL")
+        exam = (res.data[0].get("exam") or "") if res.data else ""
+        return exam == "DRILL" or exam.startswith("DRILL:")
+    except Exception:
+        return False
+
+
+def _morning_kickoff_pending(chat_id: str) -> bool:
+    """True if morning kickoff was sent in the last 2 hours."""
+    from datetime import datetime, timezone, timedelta
+    from bot.supabase_client import get_sb
+    try:
+        window = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        res = get_sb().table("conversations")\
+            .select("id").eq("chat_id", chat_id).eq("role", "assistant")\
+            .gte("created_at", window)\
+            .ilike("content", "%Today's focus%")\
+            .limit(1).execute()
+        return bool(res.data)
+    except Exception:
+        return False
+
+
+def _is_nightly_pending(chat_id: str) -> bool:
+    """True if nightly revision was sent in the last 30 minutes (difficulty reply window)."""
+    from datetime import datetime, timezone, timedelta
+    from bot.supabase_client import get_sb
+    try:
+        window = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        res = get_sb().table("conversations")\
+            .select("id").eq("chat_id", chat_id).eq("role", "assistant")\
+            .gte("created_at", window)\
+            .ilike("content", "%How's the difficulty%")\
+            .limit(1).execute()
+        return bool(res.data)
     except Exception:
         return False
 
@@ -176,10 +213,11 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             # schedule_job deactivates any existing same-type job first, so re-onboarding
             # won't create duplicates.
             try:
-                from bot.scheduler import schedule_job
-                schedule_job(chat_id, "fact_drill", 120)  # fact + question every 2 hours, 8 AM–10 PM IST
+                from bot.scheduler import schedule_job, _next_0330_utc
+                schedule_job(chat_id, "fact_drill", 120)
+                schedule_job(chat_id, "morning_kickoff", 1440, next_run_at=_next_0330_utc())
             except Exception as e:
-                print(f"[handler] failed to auto-schedule fact_drill for {chat_id}: {e}")
+                print(f"[handler] failed to auto-schedule jobs for {chat_id}: {e}")
             return WELCOME_MSG
         try:
             from bot.supabase_client import get_sb
@@ -223,6 +261,48 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             or bool(_re.match(r'^[a-d][\.\s]', t))
             or bool(_re.search(r'\bq\d+[\.\s]', t))
         )
+
+    # --- Difficulty reply (after nightly revision) ---
+    if lower in {"1", "2", "3"} and not has_active_quiz(chat_id) and not has_active_mock_test(chat_id):
+        if _is_nightly_pending(chat_id):
+            pref = {"1": "easy", "2": "just_right", "3": "hard"}[lower]
+            from bot.supabase_client import get_sb as _gsb_diff
+            _gsb_diff().table("user_profiles").update({"difficulty_preference": pref})\
+                .eq("chat_id", chat_id).execute()
+            ack = {
+                "easy": "Got it — I'll give you more confidence-building questions 💪",
+                "just_right": "Perfect, keeping the same difficulty 👍",
+                "hard": "Challenge mode ON 🔥 I'll push you harder!",
+            }
+            reply = ack[pref]
+            save_message(chat_id, "assistant", reply)
+            return reply
+
+    # --- Morning kickoff responses (START / SKIP / HARD) ---
+    if not has_active_quiz(chat_id) and not has_active_mock_test(chat_id):
+        if lower in {"start", "▶️ start", "begin", "let's go", "lets go"} and _morning_kickoff_pending(chat_id):
+            from bot.quiz import start_batch_quiz
+            text, q_data = start_batch_quiz(chat_id, 5)
+            await _quiz_reply(chat_id, "Let's go! 🔥 Here are your 5 questions:", None)
+            await send_message(chat_id, text)
+            return None
+
+        if lower in {"skip", "⏭ skip", "skip today"} and _morning_kickoff_pending(chat_id):
+            reply = "No problem — rest day it is. Come back tonight for revision! 💪"
+            save_message(chat_id, "assistant", reply)
+            return reply
+
+        if lower in {"hard", "💪 hard", "hard mode"} and _morning_kickoff_pending(chat_id):
+            from bot.supabase_client import get_sb as _gsb_hard
+            _gsb_hard().table("user_profiles").update({"difficulty_preference": "hard"})\
+                .eq("chat_id", chat_id).execute()
+            from bot.quiz import start_batch_quiz
+            text, q_data = start_batch_quiz(chat_id, 5)
+            reply = "Challenge mode ON 🔥 Questions set to hard difficulty!"
+            save_message(chat_id, "assistant", reply)
+            await send_message(chat_id, reply)
+            await send_message(chat_id, text)
+            return None
 
     # --- Start auto drills ---
     start_auto_drill_triggers = {
@@ -319,6 +399,22 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
             await send_message(chat_id, "Couldn't load drill right now. Try again!")
         return None
 
+    # --- Rapid fire mode ---
+    rapid_fire_triggers = {"rapid fire", "rapidfire", "rapid fire mode", "speed round", "5 questions fast", "quick fire"}
+    if any(t in lower for t in rapid_fire_triggers):
+        if has_active_mock_test(chat_id):
+            await send_message(chat_id, "Finish your current test first! 💪")
+            return None
+        from bot.quiz import start_rapid_fire
+        await send_message(chat_id, "⚡ *Rapid Fire* — 5 questions incoming! No stopping.")
+        try:
+            text, q_data = start_rapid_fire(chat_id)
+            await _quiz_reply(chat_id, text, q_data)
+        except Exception as e:
+            print(f"[handler] rapid_fire failed: {e}")
+            await send_message(chat_id, "Couldn't start rapid fire right now. Try again!")
+        return None
+
     hpsc_mock_triggers = {"hpsc mock", "blueprint mock", "full mock test", "paper 1 mock", "100 question mock", "hpsc full mock"}
     if any(t in lower for t in hpsc_mock_triggers):
         from bot.quiz import start_hpsc_mock
@@ -406,8 +502,27 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         if lower in STOP_PHRASES:
             await _quiz_reply(chat_id, *stop_quiz(chat_id))
             return None
+
+        # CONF/ERR state: waiting for confidence/error-type reply — must check BEFORE _is_answer
+        if _is_conf_waiting(chat_id):
+            if lower in {"1", "2", "3"}:
+                is_drill = _get_drill_session(chat_id)
+                text, q_data = record_confidence(chat_id, lower)
+                await _quiz_reply(chat_id, text, q_data)
+                if is_drill:
+                    _reschedule_drill(chat_id, 45)
+                return None
+            elif lower not in STOP_PHRASES and lower not in SKIP_PHRASES:
+                # Any other reply (not stop/skip) while pending → re-prompt
+                re_prompt = "_Reply *1*, *2*, or *3* to continue (or *skip* to move on)_"
+                save_message(chat_id, "assistant", re_prompt)
+                await send_message(chat_id, re_prompt)
+                return None
+
         if lower in SKIP_PHRASES:
             is_drill = _get_drill_session(chat_id)
+            if _is_conf_waiting(chat_id):
+                record_confidence(chat_id, "skip")  # clear state, don't send next Q
             await _quiz_reply(chat_id, *check_answer(chat_id, "X"))
             if is_drill:
                 _reschedule_drill(chat_id, 45)

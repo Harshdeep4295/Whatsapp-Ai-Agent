@@ -136,6 +136,17 @@ Match pairs must:
 Return ONLY valid JSON, nothing else:
 {{"question":"Match List I with List II:\\n\\nList I\\n(a) [item1]\\n(b) [item2]\\n(c) [item3]\\n(d) [item4]\\n\\nList II\\n(i) [match1]\\n(ii) [match2]\\n(iii) [match3]\\n(iv) [match4]\\n\\nSelect the correct answer using the codes below:","options":{{"A":"a-i, b-ii, c-iii, d-iv","B":"a-ii, b-i, c-iv, d-iii","C":"a-iii, b-iv, c-i, d-ii","D":"a-iv, b-iii, c-ii, d-i"}},"correct":"B","explanation":"[2-3 sentences: the correct matches and why, plus one fact that helps remember the pairing]"}}"""
 
+MCQ_COMPARISON_PROMPT = """Generate ONE HCS (Haryana Civil Services) Prelims exam style MCQ strictly on this topic: {subject}
+
+The question MUST be comparison-style — the student previously confused two similar options on this topic.
+- Compare two entities (leaders, acts, rivers, events, districts, schemes) on a specific attribute
+- Format: "Which of the following correctly distinguishes [X] from [Y]?" or "Which statement correctly compares..."
+- Options should differ in which entity has which attribute — classic confusion trap
+- Match actual HPSC GS paper difficulty
+
+Return ONLY valid JSON, nothing else:
+{{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"2-3 sentences: the exact distinction, why the other options are wrong, memory tip for the comparison"}}"""
+
 MOCK_TEST_PROMPT = """Generate exactly {n} HCS (Haryana Civil Services) Prelims style MCQs {topic_constraint}.
 
 Each question must match actual HPSC exam style and test conceptual understanding.
@@ -182,7 +193,7 @@ Return ONLY valid JSON array, nothing else:
 
 
 def _get_adaptive_topic(chat_id: str, subject: str) -> str:
-    """Pick topic adaptively based on user_progress. Weak topics get 3x weight, untried 2x, strong 1x."""
+    """Pick topic adaptively based on user_progress and difficulty_preference."""
     if subject and subject.lower() not in ["general", "general studies", "", "hcs"]:
         return subject
 
@@ -195,19 +206,47 @@ def _get_adaptive_topic(chat_id: str, subject: str) -> str:
     except Exception:
         progress = {}
 
+    # Read difficulty preference
+    difficulty = "just_right"
+    try:
+        prof = sb.table("user_profiles").select("difficulty_preference")\
+            .eq("chat_id", chat_id).limit(1).execute()
+        if prof.data and prof.data[0].get("difficulty_preference"):
+            difficulty = prof.data[0]["difficulty_preference"]
+    except Exception:
+        pass
+
     weighted = []
     for topic in all_topics:
         p = progress.get(topic)
         if p is None or p["total"] == 0:
-            weight = 2  # untried — ensure coverage
+            weight = 2  # untried — always some coverage
         else:
             pct = p["correct"] / p["total"]
-            if pct < 0.6:
-                weight = 3  # weak topic — prioritize
-            elif pct > 0.8:
-                weight = 1  # strong topic — deprioritize
+            if difficulty == "hard":
+                # Target 60-80% range — challenging but not crushing
+                if 0.60 <= pct <= 0.80:
+                    weight = 4
+                elif pct > 0.80:
+                    weight = 2  # mastered — less frequent in hard mode
+                else:
+                    weight = 1  # below 60% — too discouraging for hard mode
+            elif difficulty == "easy":
+                # Target 30-50% range — confidence building
+                if 0.30 <= pct <= 0.50:
+                    weight = 4
+                elif pct < 0.30:
+                    weight = 1  # crushing difficulty — avoid
+                else:
+                    weight = 2
             else:
-                weight = 2
+                # Default: weak topics prioritized
+                if pct < 0.6:
+                    weight = 3
+                elif pct > 0.8:
+                    weight = 1
+                else:
+                    weight = 2
         weighted.extend([topic] * weight)
 
     return random.choice(weighted)
@@ -260,7 +299,7 @@ def _update_progress(
         print(f"[quiz] answer history insert failed: {e}")
 
 
-def _generate(subject: str) -> dict:
+def _generate(subject: str, hint: str | None = None) -> dict:
     topic = subject
     # CSAT/aptitude topics need simple MCQ format, not GS recall formats
     csat_topic = any(
@@ -270,7 +309,9 @@ def _generate(subject: str) -> dict:
                    "problem solving", "data"]
     )
     r = random.random()
-    if csat_topic:
+    if hint == "comparison" and not csat_topic:
+        prompt = MCQ_COMPARISON_PROMPT  # user confused last time — force comparison question
+    elif csat_topic:
         prompt = MCQ_PROMPT          # simple MCQ for aptitude/reasoning
     elif r < 0.55:
         prompt = MCQ_STMT_PROMPT     # ~55% statement-correctness
@@ -299,7 +340,7 @@ def _fmt(q: dict) -> str:
     return f"{topic_line}{q['question']}\n\n{opts}\n\n_Reply A, B, C, or D_"
 
 
-def _mock_report(questions: list, answers: list, n: int) -> str:
+def _mock_report(questions: list, answers: list, n: int, mode: str = "standard") -> str:
     correct_count = sum(1 for a in answers if a["correct"])
     pct = int(correct_count / n * 100)
 
@@ -326,7 +367,8 @@ def _mock_report(questions: list, answers: list, n: int) -> str:
     else:
         verdict = "Don't be discouraged — every wrong answer shows you exactly what to study next. 💪"
 
-    report = f"*Mock Test Complete!* 🏁\n\nScore: *{correct_count}/{n}* ({pct}%)\n\n{verdict}\n\n"
+    header = "*Rapid Fire Complete!* ⚡" if mode == "rapid_fire" else "*Mock Test Complete!* 🏁"
+    report = f"{header}\n\nScore: *{correct_count}/{n}* ({pct}%)\n\n{verdict}\n\n"
 
     weak = [t for t, s in topic_stats.items() if s["total"] > 0 and s["correct"] / s["total"] < 0.6]
     if weak:
@@ -389,27 +431,43 @@ def check_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]:
 
     if is_right:
         result = f"*Correct!* 🎉\n\n{s['explanation']}"
-        result += f"\n\n_Score: {new_score}/{new_total}_ · Next one 👇"
+        result += f"\n\n_Score: {new_score}/{new_total}_"
+        result += "\n\n*Was this:*\n1. Guess\n2. Logic\n3. Memory\n\n_(or skip to continue)_"
     else:
         result = (
             f"*Not quite — the answer is {correct}.* {s['options'][correct]}\n\n"
             f"💡 *Concept:* {s['explanation']}\n\n"
-            f"_Score: {new_score}/{new_total}_ · Next one 👇"
+            f"_Score: {new_score}/{new_total}_"
         )
+        result += "\n\n*Why did you get this wrong?*\n1. Didn't know\n2. Confused options\n3. Silly mistake\n\n_(or skip to continue)_"
+
+    # Check if last error was "confusion" — use comparison question next time
+    next_hint = None
+    try:
+        last_err = sb.table("user_answer_history").select("error_type")\
+            .eq("chat_id", chat_id)\
+            .order("attempted_at", desc=True).limit(1).execute()
+        if last_err.data and last_err.data[0].get("error_type") == "confusion":
+            next_hint = "comparison"
+    except Exception:
+        pass
 
     next_topic = _get_adaptive_topic(chat_id, "")
-    next_q = _generate(next_topic)
+    next_q = _generate(next_topic, hint=next_hint)
+
+    # Tag session: CONF if correct, ERR if wrong — next question already saved
+    base_exam = (s.get("exam") or "HCS").split(":")[0]
+    new_tag = f"{base_exam}:CONF" if is_right else f"{base_exam}:ERR"
     sb.table("quiz_sessions").update({
         "question": next_q["question"], "options": next_q["options"],
         "correct_answer": next_q["correct"], "explanation": next_q["explanation"],
         "subject": next_q.get("_topic", next_topic),
         "score": new_score, "total": new_total,
+        "exam": new_tag,
     }).eq("chat_id", chat_id).execute()
 
-    return (
-        result,
-        {"question": next_q["question"], "options": next_q["options"], "topic": next_q.get("_topic", next_topic)},
-    )
+    # Return None for q_data — next question sent only after confidence reply
+    return result, None
 
 
 def stop_quiz(chat_id: str) -> tuple[str, None]:
@@ -428,6 +486,68 @@ def has_active_quiz(chat_id: str) -> bool:
     res = sb.table("quiz_sessions").select("id")\
         .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
     return bool(res.data)
+
+
+def _is_conf_waiting(chat_id: str) -> bool:
+    """True if quiz session is in CONF or ERR state (waiting for follow-up reply)."""
+    try:
+        res = sb.table("quiz_sessions").select("exam")\
+            .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
+        exam = (res.data[0].get("exam") or "") if res.data else ""
+        return ":CONF" in exam or ":ERR" in exam
+    except Exception:
+        return False
+
+
+def record_confidence(chat_id: str, reply: str) -> tuple[str, dict | None]:
+    """Store confidence/error_type from user reply, restore session state, return next question."""
+    try:
+        res = sb.table("quiz_sessions").select("*")\
+            .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
+        if not res.data:
+            return "No active quiz.", None
+        s = res.data[0]
+        exam = s.get("exam") or ""
+
+        # Map reply to label
+        if ":CONF" in exam:
+            label_map = {"1": "guess", "2": "logic", "3": "memory"}
+            field = "confidence"
+        else:
+            label_map = {"1": "no_knowledge", "2": "confusion", "3": "silly"}
+            field = "error_type"
+
+        label = label_map.get(reply)  # None if "skip"
+
+        # Update most recent user_answer_history row
+        if label:
+            try:
+                hist_res = sb.table("user_answer_history").select("id")\
+                    .eq("chat_id", chat_id)\
+                    .order("attempted_at", desc=True).limit(1).execute()
+                if hist_res.data:
+                    sb.table("user_answer_history").update({field: label})\
+                        .eq("id", hist_res.data[0]["id"]).execute()
+            except Exception as e:
+                print(f"[quiz] record_confidence update failed: {e}")
+
+        # Restore base exam tag
+        base_exam = exam.split(":")[0]
+        sb.table("quiz_sessions").update({"exam": base_exam})\
+            .eq("chat_id", chat_id).execute()
+
+        # Return next question (already saved in session by check_answer)
+        q_data = {
+            "question": s["question"],
+            "options": s["options"],
+            "topic": s.get("subject", ""),
+        }
+        intro = "📚 Next one:"
+        return intro, q_data
+
+    except Exception as e:
+        print(f"[quiz] record_confidence failed: {e}")
+        return "Let's continue!", None
 
 
 def start_batch_quiz(chat_id: str, n: int = 5, topic: str = None) -> tuple[str, None]:
@@ -564,7 +684,10 @@ def check_mock_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]
         source="mock",
     )
 
-    if is_right:
+    test_mode = test.get("mode", "standard")
+    if test_mode == "rapid_fire":
+        feedback = "✅" if is_right else f"❌ _(correct: {correct}. {q['options'][correct]})_"
+    elif is_right:
         feedback = f"*Correct!* ✅\n\n{q['explanation']}"
     else:
         feedback = (
@@ -578,7 +701,7 @@ def check_mock_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]
         sb.table("mock_tests").update({
             "answers": answers, "active": False, "current_idx": next_idx
         }).eq("id", test["id"]).execute()
-        return feedback + "\n\n" + _mock_report(questions, answers, n), None
+        return feedback + "\n\n" + _mock_report(questions, answers, n, mode=test_mode), None
     else:
         sb.table("mock_tests").update({
             "answers": answers, "current_idx": next_idx
@@ -594,6 +717,19 @@ def has_active_mock_test(chat_id: str) -> bool:
     res = sb.table("mock_tests").select("id")\
         .eq("chat_id", chat_id).eq("active", True).limit(1).execute()
     return bool(res.data)
+
+
+def start_rapid_fire(chat_id: str) -> tuple[str, dict | None]:
+    """5-question rapid fire: minimal feedback between questions, full report at end."""
+    text, q_data = start_mock_test(chat_id, n=5, topic=None)
+    # Tag the mock test as rapid_fire to suppress mid-question explanations
+    try:
+        sb.table("mock_tests").update({"mode": "rapid_fire"})\
+            .eq("chat_id", chat_id).eq("active", True).execute()
+    except Exception as e:
+        print(f"[quiz] start_rapid_fire mode tag failed: {e}")
+    header = "*Rapid Fire* ⚡\n\n5 questions. No stopping. Let's go!\n\nQ1:"
+    return header, q_data
 
 
 def _scale_blueprint(n: int) -> list:
