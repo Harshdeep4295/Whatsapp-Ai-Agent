@@ -77,12 +77,15 @@ The question must:
 - Test conceptual understanding, not just trivia
 - For CSAT topics: test reasoning/aptitude skills
 - For GS topics: test factual + analytical knowledge about India/Haryana
+- **IMPORTANT: Use ONLY text-based data. NO charts, pie charts, bar graphs, diagrams, images, or visual elements.**
+- **For Data Interpretation: embed the table/numbers DIRECTLY in the question text using simple ASCII format if needed.**
 
 CRITICAL VALIDATION:
 1. The "correct" field MUST be exactly one of: A, B, C, or D (uppercase, single character)
 2. The correct answer MUST match one of the option values in your JSON
 3. Your explanation MUST clearly show why that specific option (A/B/C/D) is correct
 4. VERIFY: Does option[correct] exist? If "correct":"C", then options must have a "C" key.
+5. **NO references to: pie chart, bar chart, graph, diagram, image, figure, visual, see the chart, refer to the graph, etc.**
 
 Return ONLY valid JSON, nothing else:
 {{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"2-3 sentences: why the correct answer is right, the key concept a student must remember, and why wrong options are traps"}}"""
@@ -163,7 +166,10 @@ Return ONLY valid JSON, nothing else:
 
 MOCK_TEST_PROMPT = """Generate exactly {n} HCS (Haryana Civil Services) Prelims style MCQs {topic_constraint}.
 
-Each question must match actual HPSC exam style and test conceptual understanding.
+Each question must:
+- Match actual HPSC exam style and test conceptual understanding
+- Use ONLY text-based data (NO charts, pie charts, bar graphs, diagrams, or images)
+- For Data Interpretation: embed table/numbers DIRECTLY in the question text
 
 Return ONLY a valid JSON array, nothing else:
 [{{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"one clear sentence","topic":"topic name"}}]"""
@@ -400,6 +406,19 @@ def _validate_question(q: dict, _attempt: int = 0, _max_attempts: int = 5) -> di
         print(f"[quiz] FAIL: Missing options (found {len(valid_opts)}/4) — regenerating (attempt {_attempt + 1}/{_max_attempts})")
         q = _generate(q.get("_topic", ""))
         return _validate_question(q, _attempt + 1, _max_attempts)
+
+    # Check 4: NO visual/chart elements required (WhatsApp doesn't support images)
+    question_text = (q.get("question", "") + " " + " ".join(options.values())).lower()
+    forbidden_words = ["pie chart", "bar chart", "bar graph", "line graph", "diagram", "figure",
+                      "image", "visual", "graph", "chart", "see the", "refer to the figure",
+                      "shown below", "given below", "following diagram", "following graph"]
+    for forbidden in forbidden_words:
+        if forbidden in question_text:
+            if _attempt >= _max_attempts:
+                raise ValueError(f"[quiz] CRITICAL: Question requires visual element '{forbidden}' after {_max_attempts} attempts. Cannot display in WhatsApp.")
+            print(f"[quiz] FAIL: Question requires visual '{forbidden}' (WhatsApp text-only) — regenerating (attempt {_attempt + 1}/{_max_attempts})")
+            q = _generate(q.get("_topic", ""))
+            return _validate_question(q, _attempt + 1, _max_attempts)
 
     # Question passed ALL checks ✅
     if _attempt > 0:
