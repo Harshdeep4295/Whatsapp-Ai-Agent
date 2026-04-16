@@ -78,7 +78,13 @@ The question must:
 - For CSAT topics: test reasoning/aptitude skills
 - For GS topics: test factual + analytical knowledge about India/Haryana
 
-Return ONLY valid JSON, nothing else. CRITICAL: The "correct" field MUST be exactly one of: A, B, C, or D (uppercase, single character).
+CRITICAL VALIDATION:
+1. The "correct" field MUST be exactly one of: A, B, C, or D (uppercase, single character)
+2. The correct answer MUST match one of the option values in your JSON
+3. Your explanation MUST clearly show why that specific option (A/B/C/D) is correct
+4. VERIFY: Does option[correct] exist? If "correct":"C", then options must have a "C" key.
+
+Return ONLY valid JSON, nothing else:
 {{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"2-3 sentences: why the correct answer is right, the key concept a student must remember, and why wrong options are traps"}}"""
 
 MCQ_STMT_PROMPT = """Generate ONE HCS (Haryana Civil Services) Prelims exam style statement-correctness question strictly on this topic: {subject}
@@ -341,9 +347,11 @@ def _generate(subject: str, hint: str | None = None) -> dict:
 
     # Validate and fix correct answer if invalid
     correct = result.get("correct", "").upper().strip()
+    options = result.get("options", {})
+
     if correct not in ["A", "B", "C", "D"]:
         # Invalid correct answer — pick first available option as fallback
-        valid_options = [k for k in result.get("options", {}).keys() if k in ["A", "B", "C", "D"]]
+        valid_options = [k for k in options.keys() if k in ["A", "B", "C", "D"]]
         if valid_options:
             result["correct"] = valid_options[0]
             print(f"[quiz] WARNING: Invalid correct answer '{correct}' for '{topic}' — using '{valid_options[0]}' instead")
@@ -353,7 +361,50 @@ def _generate(subject: str, hint: str | None = None) -> dict:
     else:
         result["correct"] = correct
 
+    # CRITICAL: Verify correct answer option actually exists
+    if result["correct"] not in options:
+        valid_options = [k for k in options.keys() if k in ["A", "B", "C", "D"]]
+        if valid_options:
+            result["correct"] = valid_options[0]
+            print(f"[quiz] CRITICAL: Correct answer '{result['correct']}' not in options {list(options.keys())} — using '{valid_options[0]}'")
+
     return result
+
+
+def _validate_question(q: dict, _attempt: int = 0, _max_attempts: int = 5) -> dict:
+    """Recursively validate and fix questions. ALWAYS returns a valid question or raises error after max attempts."""
+
+    # Check 1: correct field is A/B/C/D
+    correct = q.get("correct", "").upper().strip()
+    if correct not in ["A", "B", "C", "D"]:
+        if _attempt >= _max_attempts:
+            raise ValueError(f"[quiz] CRITICAL: Could not generate valid question after {_max_attempts} attempts. LLM returned invalid correct field: '{correct}'")
+        print(f"[quiz] FAIL: Invalid correct field '{correct}' — regenerating (attempt {_attempt + 1}/{_max_attempts})")
+        q = _generate(q.get("_topic", ""))
+        return _validate_question(q, _attempt + 1, _max_attempts)
+
+    # Check 2: correct answer exists in options
+    options = q.get("options", {})
+    if correct not in options:
+        if _attempt >= _max_attempts:
+            raise ValueError(f"[quiz] CRITICAL: Correct answer '{correct}' not in options {list(options.keys())} after {_max_attempts} attempts")
+        print(f"[quiz] FAIL: Correct answer '{correct}' not in options {list(options.keys())} — regenerating (attempt {_attempt + 1}/{_max_attempts})")
+        q = _generate(q.get("_topic", ""))
+        return _validate_question(q, _attempt + 1, _max_attempts)
+
+    # Check 3: all four options present
+    valid_opts = [k for k in options.keys() if k in ["A", "B", "C", "D"]]
+    if len(valid_opts) < 4:
+        if _attempt >= _max_attempts:
+            raise ValueError(f"[quiz] CRITICAL: Missing options. Found {len(valid_opts)}/4 after {_max_attempts} attempts")
+        print(f"[quiz] FAIL: Missing options (found {len(valid_opts)}/4) — regenerating (attempt {_attempt + 1}/{_max_attempts})")
+        q = _generate(q.get("_topic", ""))
+        return _validate_question(q, _attempt + 1, _max_attempts)
+
+    # Question passed ALL checks ✅
+    if _attempt > 0:
+        print(f"[quiz] ✅ Valid question generated on attempt {_attempt + 1}")
+    return q
 
 
 def _fmt(q: dict) -> str:
@@ -414,7 +465,13 @@ def _mock_report(questions: list, answers: list, n: int, mode: str = "standard")
 
 def start_quiz(chat_id: str, exam: str, subject: str) -> tuple[str, dict]:
     topic = _get_adaptive_topic(chat_id, subject)
-    q = _generate(topic)
+    try:
+        q = _generate(topic)
+        q = _validate_question(q)  # Ensure question is valid before sending
+    except Exception as e:
+        print(f"[quiz] ERROR generating valid question for {topic}: {e}")
+        return "Sorry, I'm having trouble generating questions right now. Please try again in a moment!", None
+
     sb.table("quiz_sessions").upsert({
         "chat_id": chat_id, "exam": "HCS", "subject": q.get("_topic", topic),
         "question": q["question"], "options": q["options"],
@@ -479,7 +536,27 @@ def check_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]:
         pass
 
     next_topic = _get_adaptive_topic(chat_id, "")
-    next_q = _generate(next_topic, hint=next_hint)
+    try:
+        next_q = _generate(next_topic, hint=next_hint)
+        next_q = _validate_question(next_q)  # Ensure next question is valid before storing
+    except Exception as e:
+        print(f"[quiz] ERROR generating next question for {next_topic}: {e}")
+        # Fallback: deactivate quiz and return error
+        sb.table("quiz_sessions").update({"active": False}).eq("chat_id", chat_id).execute()
+        result_msg = (
+            f"{'*Correct!* 🎉' if is_right else f'*Not quite — the answer is {correct}.*'}\n\n"
+            f"{s['explanation']}\n\n"
+            f"_Score: {new_score}/{new_total}_\n\n"
+            "⚠️ I'm having trouble generating the next question. "
+            "Please try *quiz me* again in a moment!"
+        )
+        _update_progress(
+            chat_id, s["subject"], is_right,
+            question_text=s["question"], options=s["options"],
+            correct_answer=correct, user_answer=letter,
+            explanation=s.get("explanation", ""), source="quiz"
+        )
+        return result_msg, None
 
     # Tag session: CONF if correct, ERR if wrong — next question already saved
     base_exam = (s.get("exam") or "HCS").split(":")[0]
@@ -898,7 +975,13 @@ def start_study_session(chat_id: str, topic: str) -> str:
     set_current_topic(chat_id, topic)
     set_study_session(chat_id, {"topic": topic, "q_count": 0, "correct": 0, "max_q": 3})
 
-    first_q = _generate(topic)
+    try:
+        first_q = _generate(topic)
+        first_q = _validate_question(first_q)  # Ensure question is valid before sending
+    except Exception as e:
+        print(f"[quiz] ERROR generating study question for {topic}: {e}")
+        return f"Sorry, I'm having trouble generating study questions on {topic}. Please try again!", None
+
     session_q = {"question": first_q["question"], "options": first_q["options"],
                  "correct": first_q["correct"], "explanation": first_q["explanation"],
                  "topic": topic}
@@ -958,7 +1041,18 @@ def check_study_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None
         summary = f"\n\n*Session Summary — {topic}*\nScore: *{correct_count}/{max_q}* ({pct}%) {msg}"
         return feedback + summary, None
     else:
-        next_q_data = _generate(topic)
+        try:
+            next_q_data = _generate(topic)
+            next_q_data = _validate_question(next_q_data)  # Ensure question is valid before storing
+        except Exception as e:
+            print(f"[quiz] ERROR generating next study question for {topic}: {e}")
+            set_study_session(chat_id, None)
+            set_current_topic(chat_id, None)
+            return (
+                feedback + "\n\n⚠️ I had trouble generating the next question. "
+                "The session has ended. Say *study [topic]* to start a new one!",
+                None
+            )
         sess["pending_q"] = {
             "question": next_q_data["question"], "options": next_q_data["options"],
             "correct": next_q_data["correct"], "explanation": next_q_data["explanation"],

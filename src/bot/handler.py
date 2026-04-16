@@ -357,7 +357,7 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
                        "quiz me on this", "send question", "yes test me", "ok test me", "i got it"}
     if any(t in lower for t in got_it_triggers):
         from bot.supabase_client import get_sb as _gsb
-        from bot.quiz import _generate
+        from bot.quiz import _generate, _validate_question
         try:
             job_res = _gsb().table("scheduled_jobs")\
                 .select("subject")\
@@ -368,6 +368,7 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
                 from bot.quiz import _get_adaptive_topic
                 topic = _get_adaptive_topic(chat_id, "")
             q = _generate(topic)
+            q = _validate_question(q)  # Ensure question quality
             q_data = {"question": q["question"], "options": q["options"], "topic": q.get("_topic", topic)}
             _gsb().table("quiz_sessions").upsert({
                 "chat_id": chat_id, "exam": "DRILL", "subject": topic,
@@ -386,11 +387,12 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
     drill_triggers = {"drill me", "fact drill", "2 hour drill", "daily drill", "give me a drill"}
     if any(t in lower for t in drill_triggers):
         from bot.scheduler import _generate_fact_with_question_context
-        from bot.quiz import _get_adaptive_topic, _generate
+        from bot.quiz import _get_adaptive_topic, _generate, _validate_question
         await send_message(chat_id, "Loading your drill... 🧠")
         try:
             topic = _get_adaptive_topic(chat_id, "")
             q = _generate(topic)
+            q = _validate_question(q)  # Ensure question quality
             fact = _generate_fact_with_question_context(q["question"])
             text_part = f"⏰ *Drill — {topic}*"
             if fact:
