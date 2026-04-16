@@ -323,6 +323,17 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         save_message(chat_id, "assistant", reply)
         return reply
 
+    # --- Report answer mismatch ---
+    if "correct answer is" in lower and any(c in lower for c in ["a", "b", "c", "d"]):
+        # Extract the letter: "correct answer is C" → "C"
+        m = _re.search(r'correct answer is\s+([a-d])', lower)
+        if m:
+            from bot.quiz import verify_answer_mismatch
+            reported = m.group(1).upper()
+            reply = verify_answer_mismatch(chat_id, reported)
+            save_message(chat_id, "assistant", reply)
+            return reply
+
     # --- Stop auto drills ---
     stop_auto_drill_triggers = {
         "stop auto drills", "stop auto drill",
@@ -522,8 +533,12 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
         if lower in SKIP_PHRASES:
             is_drill = _get_drill_session(chat_id)
             if _is_conf_waiting(chat_id):
-                record_confidence(chat_id, "skip")  # clear state, don't send next Q
-            await _quiz_reply(chat_id, *check_answer(chat_id, "X"))
+                # Skip from confidence reply — send next question directly
+                text, q_data = record_confidence(chat_id, "skip")
+                await _quiz_reply(chat_id, text, q_data)
+            else:
+                # Skip from answer — process as wrong answer and show feedback with next Q
+                await _quiz_reply(chat_id, *check_answer(chat_id, "X"))
             if is_drill:
                 _reschedule_drill(chat_id, 45)
             return None

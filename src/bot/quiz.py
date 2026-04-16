@@ -78,7 +78,7 @@ The question must:
 - For CSAT topics: test reasoning/aptitude skills
 - For GS topics: test factual + analytical knowledge about India/Haryana
 
-Return ONLY valid JSON, nothing else:
+Return ONLY valid JSON, nothing else. CRITICAL: The "correct" field MUST be exactly one of: A, B, C, or D (uppercase, single character).
 {{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"2-3 sentences: why the correct answer is right, the key concept a student must remember, and why wrong options are traps"}}"""
 
 MCQ_STMT_PROMPT = """Generate ONE HCS (Haryana Civil Services) Prelims exam style statement-correctness question strictly on this topic: {subject}
@@ -94,6 +94,8 @@ The statements must:
 - Test precise factual knowledge — dates, distinctions, locations, conditions
 - Include plausible incorrect statements that common misconceptions produce
 - Match actual HPSC GS paper difficulty and style
+
+CRITICAL: The "correct" field MUST be exactly one of: A, B, C, or D (uppercase, single character). Count the correct statements and return the matching option.
 
 Return ONLY valid JSON, nothing else:
 {{"question":"Consider the following statements about [specific aspect]:\\n1. [statement]\\n2. [statement]\\n3. [statement]\\n\\nHow many of the above statements are correct?","options":{{"A":"None","B":"Only one","C":"Only two","D":"All three"}},"correct":"B","explanation":"[2-3 sentences: which statements are correct and why, the core concept, and a memory tip]"}}"""
@@ -115,6 +117,8 @@ The assertion and reason must:
 - Be grounded in actual HCS/UPSC-level facts
 - Match actual HPSC GS paper style
 
+CRITICAL: The "correct" field MUST be exactly one of: A, B, C, or D (uppercase, single character).
+
 Return ONLY valid JSON, nothing else:
 {{"question":"Assertion (A): [assertion text]\\nReason (R): [reason text]","options":{{"A":"Both A and R are true, and R correctly explains A","B":"Both A and R are true, but R does NOT correctly explain A","C":"A is false, but R is true","D":"A is true, but R is false"}},"correct":"C","explanation":"[2-3 sentences: what is true/false in A and R, the underlying concept, and why this combination is a classic exam trap]"}}"""
 
@@ -133,6 +137,8 @@ Match pairs must:
 - Use plausible wrong pairings as distractors
 - Match actual HPSC GS paper difficulty
 
+CRITICAL: The "correct" field MUST be exactly one of: A, B, C, or D (uppercase, single character). Verify the matches are correct before assigning.
+
 Return ONLY valid JSON, nothing else:
 {{"question":"Match List I with List II:\\n\\nList I\\n(a) [item1]\\n(b) [item2]\\n(c) [item3]\\n(d) [item4]\\n\\nList II\\n(i) [match1]\\n(ii) [match2]\\n(iii) [match3]\\n(iv) [match4]\\n\\nSelect the correct answer using the codes below:","options":{{"A":"a-i, b-ii, c-iii, d-iv","B":"a-ii, b-i, c-iv, d-iii","C":"a-iii, b-iv, c-i, d-ii","D":"a-iv, b-iii, c-ii, d-i"}},"correct":"B","explanation":"[2-3 sentences: the correct matches and why, plus one fact that helps remember the pairing]"}}"""
 
@@ -143,6 +149,8 @@ The question MUST be comparison-style — the student previously confused two si
 - Format: "Which of the following correctly distinguishes [X] from [Y]?" or "Which statement correctly compares..."
 - Options should differ in which entity has which attribute — classic confusion trap
 - Match actual HPSC GS paper difficulty
+
+CRITICAL: The "correct" field MUST be exactly one of: A, B, C, or D (uppercase, single character).
 
 Return ONLY valid JSON, nothing else:
 {{"question":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct":"A","explanation":"2-3 sentences: the exact distinction, why the other options are wrong, memory tip for the comparison"}}"""
@@ -330,6 +338,21 @@ def _generate(subject: str, hint: str | None = None) -> dict:
             raw = raw[4:]
     result = json.loads(raw.strip())
     result["_topic"] = topic
+
+    # Validate and fix correct answer if invalid
+    correct = result.get("correct", "").upper().strip()
+    if correct not in ["A", "B", "C", "D"]:
+        # Invalid correct answer — pick first available option as fallback
+        valid_options = [k for k in result.get("options", {}).keys() if k in ["A", "B", "C", "D"]]
+        if valid_options:
+            result["correct"] = valid_options[0]
+            print(f"[quiz] WARNING: Invalid correct answer '{correct}' for '{topic}' — using '{valid_options[0]}' instead")
+        else:
+            result["correct"] = "A"  # Last resort fallback
+            print(f"[quiz] ERROR: No valid options found for '{topic}'")
+    else:
+        result["correct"] = correct
+
     return result
 
 
@@ -416,6 +439,9 @@ def check_answer(chat_id: str, user_answer: str) -> tuple[str, dict | None]:
     is_right = letter == correct
     new_score = s["score"] + (1 if is_right else 0)
     new_total = s["total"] + 1
+
+    # Log answer for debugging mismatches
+    print(f"[quiz] {chat_id}: Q='{s.get('subject', 'unknown')}' User='{letter}' Correct='{correct}' Match={is_right}")
 
     _update_progress(
         chat_id,
@@ -1054,3 +1080,27 @@ def has_active_passage_quiz(chat_id: str) -> bool:
     from bot.memory import get_study_session
     sess = get_study_session(chat_id)
     return bool(sess and sess.get("mode") == "passage")
+
+
+def verify_answer_mismatch(chat_id: str, reported_correct: str) -> str:
+    """Log answer mismatch report for later review. Returns confirmation."""
+    try:
+        res = sb.table("user_answer_history").select("*")\
+            .eq("chat_id", chat_id)\
+            .order("attempted_at", desc=True).limit(1).execute()
+        if res.data:
+            record = res.data[0]
+            sb.table("user_answer_history").update({
+                "reported_correct": reported_correct,
+                "mismatch_flag": True
+            }).eq("id", record["id"]).execute()
+            return (
+                f"✅ Mismatch logged for review:\n"
+                f"*Question:* {record['question_text'][:100]}…\n"
+                f"*Bot said:* {record['correct_answer']}\n"
+                f"*You say:* {reported_correct}\n\n"
+                f"Thanks for catching that! We're tracking this to improve the system."
+            )
+    except Exception as e:
+        print(f"[quiz] verify_answer_mismatch failed: {e}")
+    return "Could not log mismatch. Please try again!"
