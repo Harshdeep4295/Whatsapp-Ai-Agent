@@ -1,0 +1,16 @@
+# Exclude unnecessary files from Cloud Run deployment
+.git
+.gitignore
+.env
+.env.local
+*.md
+__pycache__
+*.pyc
+.pytest_cache
+.claude
+.venv
+venv
+node_modules
+.DS_Store
+.git/
+.gitignore
