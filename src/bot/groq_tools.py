@@ -56,7 +56,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "start_study_session",
-            "description": "Start a guided study session (overview + 3 questions) on a specific topic. Call when a study topic has been established — either named directly ('study Polity', 'teach me Haryana History') OR confirmed through conversation (user said 'help me revise' → you asked → they confirmed a topic). Once the topic is clear, call this immediately — do NOT keep chatting. Still ask for topic if genuinely unknown.",
+            "description": "Start a guided study session (overview + 3 questions) on a specific topic. Call when user explicitly wants guided study with questions — says 'study X', 'revise X', 'let me practise X', or confirms a topic after being asked. Do NOT call for 'what is X', 'explain X', or 'tell me about X' — use explain_topic for those. Once the topic is clear, call this immediately.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -75,6 +75,29 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "topic": {"type": "string", "description": "The HCS topic to teach from scratch e.g. 'Panchayati Raj', 'Haryana Geography', 'Indian Economy'"}
+                },
+                "required": ["topic"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_topic",
+            "description": (
+                "Explain an HCS topic in plain text — NO quiz questions attached. "
+                "Use when user asks 'what is X', 'tell me about X', 'explain X', "
+                "'could you tell me more about X', 'info on X', 'summarise X', "
+                "'describe X'. Does NOT start a quiz or study session. "
+                "Returns a concise explanation only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "The HCS topic or concept to explain e.g. 'Pradhan Mantri Jan Dhan Yojana', 'Panchayati Raj', 'Haryana Geography'"
+                    }
                 },
                 "required": ["topic"]
             }

@@ -15,6 +15,7 @@ async def execute_tool(name: str, inputs: dict, chat_id: str) -> str:
         "start_hpsc_mock": _start_hpsc_mock,
         "start_haryana_special": _start_haryana_special,
         "search_and_summarise": _search_and_summarise,
+        "explain_topic": _explain_topic,
     }
     fn = fns.get(name)
     if not fn:
@@ -285,3 +286,21 @@ async def _search_and_summarise(chat_id: str, query: str) -> str:
         temperature=0.6,
     )
     return f"*Search: {query}*\n\n{summary.strip()}"
+
+
+async def _explain_topic(chat_id: str, topic: str) -> str:
+    from bot.llm import create_completion
+    from bot.whatsapp import send_message
+
+    explanation = create_completion(
+        messages=[{"role": "user", "content":
+            f"You are Yudhister, HCS exam coach. Explain '{topic}' for an HCS aspirant.\n\n"
+            f"Cover: what it is, key facts/dates/numbers, why it matters for HCS Prelims.\n"
+            f"Keep it under 180 words. Friendly, clear, no quiz questions. "
+            f"End with one *HCS exam tip* in bold."
+        }],
+        max_tokens=350,
+        temperature=0.7,
+    )
+    await send_message(chat_id, explanation.strip())
+    return "Explanation delivered to user."
