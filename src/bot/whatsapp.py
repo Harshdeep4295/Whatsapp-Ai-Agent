@@ -1,11 +1,26 @@
 import httpx
+import json
+import logging
 from config import WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN
+
+# Setup logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 GRAPH_URL = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
 HEADERS = {
     "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
     "Content-Type": "application/json",
 }
+
+# Log config on startup
+logger.info(f"[WHATSAPP CONFIG] Phone ID: {WHATSAPP_PHONE_NUMBER_ID}")
+logger.info(f"[WHATSAPP CONFIG] Graph URL: {GRAPH_URL}")
+logger.info(f"[WHATSAPP CONFIG] Token present: {'Yes' if WHATSAPP_ACCESS_TOKEN else 'NO - ERROR!'}")
+logger.info(f"[WHATSAPP CONFIG] Token length: {len(WHATSAPP_ACCESS_TOKEN) if WHATSAPP_ACCESS_TOKEN else 0}")
+logger.info(f"[WHATSAPP CONFIG] Token first 10 chars: {WHATSAPP_ACCESS_TOKEN[:10] if WHATSAPP_ACCESS_TOKEN else 'N/A'}...")
+if not WHATSAPP_ACCESS_TOKEN:
+    logger.error("❌ WHATSAPP_ACCESS_TOKEN is NOT SET!")
 
 _CHUNK_LIMIT = 3800  # leave headroom below WhatsApp's 4096 char limit
 
@@ -49,12 +64,33 @@ async def _send_single(client: httpx.AsyncClient, to: str, text: str):
         "text": {"body": text},
     }
     preview = text[:80].replace("\n", " ")
+
+    # Log request details
+    logger.info(f"[REQUEST] Sending to: {to} | Text length: {len(text)}ch | Preview: {preview!r}")
+    logger.debug(f"[REQUEST] URL: {GRAPH_URL}")
+    logger.debug(f"[REQUEST] Payload: {json.dumps(payload, indent=2)}")
+    logger.debug(f"[REQUEST] Headers: Authorization: Bearer {WHATSAPP_ACCESS_TOKEN[:10]}..., Content-Type: application/json")
+
     print(f"[whatsapp] → {to} | {len(text)}ch | {preview!r}")
-    r = await client.post(GRAPH_URL, json=payload, headers=HEADERS)
-    if r.status_code != 200:
-        print(f"[whatsapp] ✗ send failed {r.status_code}: {r.text}")
-        raise RuntimeError(f"WhatsApp API error {r.status_code}: {r.text}")
-    print(f"[whatsapp] ✓ delivered")
+
+    try:
+        r = await client.post(GRAPH_URL, json=payload, headers=HEADERS)
+
+        # Log response details
+        logger.info(f"[RESPONSE] Status Code: {r.status_code}")
+        logger.debug(f"[RESPONSE] Headers: {dict(r.headers)}")
+        logger.debug(f"[RESPONSE] Body: {r.text}")
+
+        if r.status_code != 200:
+            logger.error(f"[ERROR] WhatsApp API returned {r.status_code}: {r.text}")
+            print(f"[whatsapp] ✗ send failed {r.status_code}: {r.text}")
+            raise RuntimeError(f"WhatsApp API error {r.status_code}: {r.text}")
+
+        logger.info(f"[SUCCESS] Message delivered to {to}")
+        print(f"[whatsapp] ✓ delivered")
+    except Exception as e:
+        logger.exception(f"[EXCEPTION] Error sending message: {str(e)}")
+        raise
 
 
 async def send_message(to: str, text: str):
@@ -82,13 +118,29 @@ async def send_interactive_quiz(to: str, question: str, options: dict, topic: st
             },
         },
     }
+
+    logger.info(f"[INTERACTIVE] Sending quiz to: {to} | Topic: {topic} | Question: {question[:60]!r}")
+    logger.debug(f"[INTERACTIVE] Payload: {json.dumps(payload, indent=2)}")
+
     print(f"[whatsapp] → {to} | interactive quiz | {question[:60]!r}")
+
     async with httpx.AsyncClient() as client:
-        r = await client.post(GRAPH_URL, json=payload, headers=HEADERS)
-        if r.status_code != 200:
-            print(f"[whatsapp] ✗ interactive quiz send failed {r.status_code}: {r.text}")
-            raise RuntimeError(f"WhatsApp API error {r.status_code}: {r.text}")
-        print(f"[whatsapp] ✓ delivered")
+        try:
+            r = await client.post(GRAPH_URL, json=payload, headers=HEADERS)
+
+            logger.info(f"[INTERACTIVE RESPONSE] Status Code: {r.status_code}")
+            logger.debug(f"[INTERACTIVE RESPONSE] Body: {r.text}")
+
+            if r.status_code != 200:
+                logger.error(f"[INTERACTIVE ERROR] {r.status_code}: {r.text}")
+                print(f"[whatsapp] ✗ interactive quiz send failed {r.status_code}: {r.text}")
+                raise RuntimeError(f"WhatsApp API error {r.status_code}: {r.text}")
+
+            logger.info(f"[INTERACTIVE SUCCESS] Quiz delivered to {to}")
+            print(f"[whatsapp] ✓ delivered")
+        except Exception as e:
+            logger.exception(f"[INTERACTIVE EXCEPTION] Error sending quiz: {str(e)}")
+            raise
 
 
 def parse_webhook(body: dict) -> tuple | None:
