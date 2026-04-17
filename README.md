@@ -1,4 +1,4 @@
-# WhatsApp HCS/HPSC Exam Tutor
+# WhatsApp HCS/HPSC Exam Tutor !
 
 An AI-powered WhatsApp tutor for the **Haryana Civil Services (HCS/HPSC) Preliminary Exam**. Delivers adaptive quizzes, mock tests, current affairs, and study sessions — entirely over WhatsApp, with no app to install.
 
