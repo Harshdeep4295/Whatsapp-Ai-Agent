@@ -1,3 +1,131 @@
+async def _get_crash_course(chat_id: str) -> str:
+    from bot.supabase_client import get_sb
+    from bot.llm import create_completion
+    from bot.whatsapp import send_message
+
+    sb = get_sb()
+
+    res = sb.table("user_progress").select("topic,correct,total") \
+        .eq("chat_id", chat_id).execute()
+    rows = sorted(res.data or [], key=lambda r: r["correct"] / r["total"])
+    weak_topics = [r["topic"] for r in rows[:4]] or ["Indian Polity", "History", "Geography", "Economy"]
+
+    topic_list = ", ".join(weak_topics)
+    prompt = (
+        f"You are Yudhister, an HCS exam expert. A student has 1 hour before their exam.\n"
+        f"Their weakest topics are: {topic_list}.\n\n"
+        f"For each topic, write 8-10 bullet points covering the most important, high-yield facts "
+        f"that appear most frequently in HCS exams. Be concise — each bullet must be under 15 words. "
+        f"Format:\n*[Topic Name]*\n• fact\n• fact\n...\n\n"
+        f"Start directly with the first topic. No intro text."
+    )
+    notes = create_completion(
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=700,
+        temperature=0.6,
+    )
+
+    header = "📋 *Crash Course — Your Weak Topics*\n_(High-yield facts only — 1 hour to exam!)_\n\n"
+    await send_message(chat_id, header + notes.strip())
+    return "Crash course notes delivered to user."
+
+
+_CHEAT_SHEET_PROMPT = (
+    "You are Yudhister, an HCS exam expert. Create a cheat sheet for: {topic}.\n"
+    "Format:\n"
+    "*{topic} — Quick Notes*\n"
+    "Key Facts:\n• ...\n• ...\n"
+    "Common Exam Traps:\n• ...\n"
+    "Remember:\n• ...\n\n"
+    "Rules: Max 15 words per bullet. No padding or intro. Exam-focused only."
+)
+
+
+async def _get_cheat_sheet(chat_id: str, topic: str) -> str:
+    from bot.supabase_client import get_sb
+    from bot.llm import create_completion
+    from bot.whatsapp import send_message
+
+    sb = get_sb()
+
+    res = sb.table("quick_notes").select("content,request_count") \
+        .eq("chat_id", chat_id).eq("topic", topic).execute()
+    row = res.data[0] if res.data else None
+
+    if row:
+        count = row["request_count"] + 1
+        is_refresh = (count % 3 == 0)
+    else:
+        count = 1
+        is_refresh = True
+
+    if is_refresh:
+        content = create_completion(
+            messages=[{"role": "user", "content": _CHEAT_SHEET_PROMPT.format(topic=topic)}],
+            max_tokens=450,
+            temperature=0.85,
+        )
+        content = content.strip()
+        sb.table("quick_notes").upsert({
+            "chat_id": chat_id,
+            "topic": topic,
+            "content": content,
+            "request_count": count,
+        }, on_conflict="chat_id,topic").execute()
+    else:
+        content = row["content"]
+        sb.table("quick_notes").update({"request_count": count}) \
+            .eq("chat_id", chat_id).eq("topic", topic).execute()
+
+    tag = "\n\n_🔄 Fresh version!_" if is_refresh and count > 1 else ""
+    await send_message(chat_id, content + tag)
+    return "Cheat sheet delivered to user."
+
+
+async def _get_confidence_boost(chat_id: str) -> str:
+    from bot.supabase_client import get_sb
+    from bot.memory import get_exam_date, _days_until
+    from bot.llm import create_completion
+    from bot.whatsapp import send_message
+
+    sb = get_sb()
+
+    res = sb.table("user_progress").select("topic,correct,total") \
+        .eq("chat_id", chat_id).execute()
+    rows = res.data or []
+
+    # Filter for strong topics: >= 80% accuracy with minimum 3 attempts
+    strong_topics = [
+        r["topic"] for r in rows
+        if r["total"] >= 3 and (r["correct"] / r["total"]) >= 0.8
+    ]
+
+    exam_date = get_exam_date(chat_id)
+    days_left = _days_until(exam_date) if exam_date else None
+    countdown = f"{days_left} days left" if days_left is not None else "your exam day"
+
+    strong_topics_str = ", ".join(strong_topics) if strong_topics else "multiple topics"
+
+    prompt = (
+        f"You are Yudhister, a warm and supportive HCS exam mentor. "
+        f"Write a genuine, encouraging message (5-7 lines of WhatsApp text, NOT bullet points) "
+        f"to a student who:\n"
+        f"• Is strong in: {strong_topics_str}\n"
+        f"• Has {countdown} to exam\n\n"
+        f"Tone: mentor-like, genuinely warm, acknowledging their progress, motivating without being preachy. "
+        f"End with a single, powerful motivational line. No emojis, no bullets."
+    )
+
+    message = create_completion(
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=200,
+        temperature=0.7,
+    )
+
+    header = "💪 *You've Got This!*\n\n"
+    await send_message(chat_id, header + message.strip())
+    return "Confidence boost message delivered to user."
+
 
 async def execute_tool(name: str, inputs: dict, chat_id: str) -> str:
     fns = {
@@ -16,6 +144,9 @@ async def execute_tool(name: str, inputs: dict, chat_id: str) -> str:
         "start_haryana_special": _start_haryana_special,
         "search_and_summarise": _search_and_summarise,
         "explain_topic": _explain_topic,
+        "get_crash_course": _get_crash_course,
+        "get_cheat_sheet": _get_cheat_sheet,
+        "get_confidence_boost": _get_confidence_boost,
     }
     fn = fns.get(name)
     if not fn:

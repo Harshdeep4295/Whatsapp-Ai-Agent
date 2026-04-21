@@ -250,6 +250,52 @@ TOOL_SCHEMAS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_crash_course",
+            "description": (
+                "Generate a concise crash course covering the user's weakest exam topics. "
+                "Use when the user says they have an exam soon and need quick revision notes. "
+                "Do NOT use for general study — use start_study_session for that."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_cheat_sheet",
+            "description": (
+                "Generate a compact cheat sheet for a specific exam topic. "
+                "Returns a cached version for efficiency; auto-refreshes every 3rd request "
+                "so the student sees a different angle. "
+                "Use when the user asks for a cheat sheet, quick notes, or summary of a specific topic. "
+                "Requires a topic name — ask for it if not provided."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "The exam topic to summarize, e.g. 'Fundamental Rights', 'Mughal Empire'.",
+                    }
+                },
+                "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_confidence_boost",
+            "description": (
+                "Send warm, mentor-style encouragement highlighting the user's strong topics and exam countdown. "
+                "Use when the user needs motivation or a morale boost before their exam."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 
