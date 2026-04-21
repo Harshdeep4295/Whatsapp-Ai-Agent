@@ -22,7 +22,8 @@ def get_profile(chat_id: str) -> dict:
     return {"chat_id": chat_id, "exam": None, "onboarded": False, "current_topic": None, "study_session": None}
 
 def save_profile(chat_id: str, exam: str | None, onboarded: bool = True):
-    data = {"chat_id": chat_id, "onboarded": onboarded}
+    today = _date.today().isoformat()
+    data = {"chat_id": chat_id, "onboarded": onboarded, "last_active_date": today}
     if exam is not None:
         data["exam"] = exam
     sb.table("user_profiles").upsert(data).execute()

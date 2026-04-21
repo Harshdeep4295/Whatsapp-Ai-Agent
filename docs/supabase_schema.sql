@@ -63,3 +63,17 @@ alter table scheduled_jobs
 
 alter table scheduled_jobs
   add column if not exists last_content_hash text;         -- MD5 hash of last sent content, used to skip duplicates
+
+-- ---------------------------------------------------------------------------
+-- Pre-exam cheat sheet cache (2026-04-22)
+-- Caches topic-specific revision notes; auto-refreshes every 3rd request
+-- ---------------------------------------------------------------------------
+create table if not exists quick_notes (
+  id            bigserial primary key,
+  chat_id       text not null,
+  topic         text not null,
+  content       text not null,
+  request_count int default 1,
+  created_at    timestamptz default now()
+);
+create unique index if not exists quick_notes_user_topic on quick_notes (chat_id, topic);

@@ -18,6 +18,14 @@ Built on FastAPI + Meta WhatsApp Business API + Groq LLM + Supabase.
 | `mock test` | Quick 10-question test on any topic |
 | `drill me` | Instant fact + question on your weakest topic |
 
+### Pre-Exam Power Toolkit (Last-Hour Prep)
+
+| Command | What it does |
+|---------|-------------|
+| `crash course` / `exam in 1 hour` | Condensed bullet-point notes on your 3–4 weakest topics (ready to memorize in 30 min) |
+| `cheat sheet on [topic]` | Compact topic summary with key facts, exam traps, and memory tips. Auto-refreshes every 3rd request with fresh examples. |
+| `am I ready?` / `confidence boost` | Warm mentor-style pep talk showing your strongest topics + exam countdown + motivational tips |
+
 ### Study
 
 | Command | What it does |
@@ -134,6 +142,7 @@ Questions mirror the actual HPSC GS paper distribution. GS topics never get simp
 | `mock_tests` | Active mock test state (questions jsonb, answers jsonb, current_idx) |
 | `scheduled_jobs` | Recurring jobs: type, interval_minutes, next_run_at, seen_keys, last_content_hash |
 | `content_cache` | Fetched and indexed study material with Chroma IDs |
+| `quick_notes` | Cached cheat sheet content per (chat_id, topic) with request_count for smart refresh |
 
 ---
 
