@@ -296,6 +296,116 @@ TOOL_SCHEMAS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_answer_writing",
+            "description": (
+                "Start a Mains answer writing practice session. Generate a descriptive/essay question and evaluate the user's written answer. "
+                "Use when the user explicitly says 'answer writing', 'practice descriptive', 'mains question on X', 'write an answer on X', or 'essay on X'. "
+                "Do NOT use for MCQ quiz requests — use start_quiz for that."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Mains topic for the question, e.g. 'Panchayati Raj', 'Indian Economy', 'Ethics in Governance'",
+                    },
+                    "answer_type": {
+                        "type": "string",
+                        "enum": ["short", "medium", "essay"],
+                        "description": "short=100 words, medium=200 words, essay=400 words. Default: medium.",
+                    },
+                },
+                "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_case_study",
+            "description": (
+                "Generate an ethics case study with a realistic dilemma scenario and 3 sub-questions. "
+                "User responds in free text, and the bot evaluates issue identification, stakeholder analysis, and recommendation quality. "
+                "Use when the user says 'case study', 'ethics question', 'give me a dilemma', 'ethics scenario', or 'case study practice'."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_mains_pyq",
+            "description": (
+                "Show HCS Mains previous year style questions (PYQ) with answer outlines. "
+                "Use when the user says 'PYQ mains', 'past questions mains', 'mains questions on X', 'what questions come in mains', 'previous year mains'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Topic for PYQ, e.g. 'Indian Economy', 'Haryana History'",
+                    },
+                    "paper": {
+                        "type": "string",
+                        "enum": ["GS1", "GS2", "GS3", "GS4/Ethics"],
+                        "description": "Optional. Restrict to specific Mains paper.",
+                    },
+                },
+                "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_answer_template",
+            "description": (
+                "Provide a writing template/framework for answering Mains questions on a specific topic. "
+                "Includes structure (opening, body points, examples, conclusion) and key tips. "
+                "Use when the user asks 'how to write answer on X', 'answer format for X', 'template for X', 'structure for answering X'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Mains topic for the template, e.g. 'History essays', 'Polity answers'",
+                    },
+                    "answer_type": {
+                        "type": "string",
+                        "enum": ["short", "medium", "essay"],
+                        "description": "Type of answer to template for. Default: medium.",
+                    },
+                },
+                "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "switch_exam_mode",
+            "description": (
+                "Switch the user between Prelims (MCQ) and Mains (descriptive) exam preparation modes. "
+                "Use when the user says 'switch to mains', 'focus on mains now', 'go back to prelims', 'prelims mode', or 'mains preparation'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["prelims", "mains"],
+                        "description": "Exam mode: 'prelims' for MCQ practice, 'mains' for descriptive/essay practice.",
+                    }
+                },
+                "required": ["mode"],
+            },
+        },
+    },
 ]
 
 

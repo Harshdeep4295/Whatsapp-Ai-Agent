@@ -56,6 +56,55 @@ HARYANA_SPECIAL_TOPICS = [
     "Haryana art, festivals, prominent personalities and awards 2024-25",
 ]
 
+# HCS Mains Topics (from mains.py — imported here for reference)
+HCS_MAINS_TOPICS = {
+    "GS1": [
+        "Indian Heritage and Culture",
+        "Modern Indian History (1857–1947)",
+        "Post-Independence India",
+        "Indian Society",
+        "Haryana History",
+        "Haryana Society and Culture",
+        "Urbanization and Social Change",
+        "Role of Women and Women's Organizations",
+        "Communalism, Regionalism, Secularism",
+    ],
+    "GS2": [
+        "Indian Constitution — Historical Underpinnings",
+        "Functions and Responsibilities of Union and States",
+        "Parliament and State Legislatures",
+        "Executive and Judiciary",
+        "Governance, Transparency and Accountability",
+        "Panchayati Raj and Local Governance (Haryana)",
+        "Welfare Schemes for Vulnerable Sections",
+        "Social Justice",
+        "India and its Neighborhood Relations",
+        "Important International Institutions",
+    ],
+    "GS3": [
+        "Indian Economy and Planning",
+        "Government Budgeting",
+        "Major Crops and Agricultural Issues (Haryana)",
+        "Land Reforms in India",
+        "Liberalization, Privatization, Globalization",
+        "Infrastructure: Energy, Ports, Roads, Airports",
+        "Science and Technology — Developments and Applications",
+        "Environment and Ecology",
+        "Disaster Management",
+        "Internal Security Challenges",
+    ],
+    "GS4": [
+        "Ethics and Human Interface",
+        "Attitude and Aptitude",
+        "Emotional Intelligence",
+        "Contributions of Moral Thinkers",
+        "Civil Service Values and Ethics",
+        "Accountability and Ethics in Government",
+        "Probity in Governance",
+        "Case Studies on Above Issues",
+    ],
+}
+
 HPSC_GS_BLUEPRINT = {
     "Indian History and Culture":     22,
     "Indian Polity and Constitution": 18,

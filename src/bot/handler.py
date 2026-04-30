@@ -551,6 +551,19 @@ async def handle_message(chat_id: str, sender: str, user_text: str, is_group: bo
                 _reschedule_drill(chat_id, 45)
             return None
 
+    # --- Active answer writing intercept (Mains) ---
+    from bot.mains import has_active_answer_writing, check_answer_writing, has_active_case_study, check_case_study_answer
+    if has_active_answer_writing(chat_id):
+        reply = await check_answer_writing(chat_id, user_text)
+        await send_message(chat_id, reply)
+        return None
+
+    # --- Active case study intercept (Mains) ---
+    if has_active_case_study(chat_id):
+        reply = await check_case_study_answer(chat_id, user_text)
+        await send_message(chat_id, reply)
+        return None
+
     # --- Tool loop (with pending-question reminder if off-topic) ---
     augmented_text = user_text
     try:

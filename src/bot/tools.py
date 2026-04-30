@@ -127,6 +127,46 @@ async def _get_confidence_boost(chat_id: str) -> str:
     return "Confidence boost message delivered to user."
 
 
+async def _start_answer_writing(chat_id: str, topic: str, answer_type: str = "medium") -> str:
+    from bot.mains import start_answer_writing
+    from bot.whatsapp import send_message
+    msg = await start_answer_writing(chat_id, topic, answer_type)
+    await send_message(chat_id, msg)
+    return f"Answer writing session started on '{topic}'. Content delivered to user."
+
+
+async def _start_case_study(chat_id: str) -> str:
+    from bot.mains import start_case_study
+    from bot.whatsapp import send_message
+    msg = await start_case_study(chat_id)
+    await send_message(chat_id, msg)
+    return "Ethics case study started. Content delivered to user."
+
+
+async def _get_mains_pyq(chat_id: str, topic: str, paper: str = None) -> str:
+    from bot.mains import get_mains_pyq
+    from bot.whatsapp import send_message
+    msg = await get_mains_pyq(chat_id, topic, paper)
+    await send_message(chat_id, msg)
+    return f"Mains PYQ on '{topic}' delivered to user."
+
+
+async def _get_answer_template(chat_id: str, topic: str, answer_type: str = "medium") -> str:
+    from bot.mains import get_answer_template
+    from bot.whatsapp import send_message
+    msg = await get_answer_template(chat_id, topic, answer_type)
+    await send_message(chat_id, msg)
+    return f"Answer template for '{topic}' delivered to user."
+
+
+async def _switch_exam_mode(chat_id: str, mode: str) -> str:
+    from bot.mains import switch_exam_mode
+    from bot.whatsapp import send_message
+    msg = await switch_exam_mode(chat_id, mode)
+    await send_message(chat_id, msg)
+    return f"Exam mode switched to {mode}."
+
+
 async def execute_tool(name: str, inputs: dict, chat_id: str) -> str:
     fns = {
         "start_quiz": _start_quiz,
@@ -147,6 +187,11 @@ async def execute_tool(name: str, inputs: dict, chat_id: str) -> str:
         "get_crash_course": _get_crash_course,
         "get_cheat_sheet": _get_cheat_sheet,
         "get_confidence_boost": _get_confidence_boost,
+        "start_answer_writing": _start_answer_writing,
+        "start_case_study": _start_case_study,
+        "get_mains_pyq": _get_mains_pyq,
+        "get_answer_template": _get_answer_template,
+        "switch_exam_mode": _switch_exam_mode,
     }
     fn = fns.get(name)
     if not fn:
